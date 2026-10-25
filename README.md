@@ -1,5 +1,11 @@
 # Slurm HRES Plugin for QRMI
 
+[![License](https://img.shields.io/github/license/qiskit-community/qrmi.svg?)](https://opensource.org/licenses/Apache-2.0) <!--- long-description-skip-begin -->
+[![Current Release](https://img.shields.io/github/release/qrmi-community/slurm-hres-plugins.svg?)](https://github.com/qrmi-community/slurm-hres-plugins/releases)
+![Platform](https://img.shields.io/badge/%F0%9F%92%BB_Platform-Linux-blue)
+[![Lua 5.4+](https://img.shields.io/badge/lua-5.4%2B-blue.svg?logo=lua&logoColor=white)](https://www.lua.org/manual/5.4/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20650771.svg)](https://doi.org/10.5281/zenodo.20650771)
+
 Last updated: 2026-10-24
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
 
