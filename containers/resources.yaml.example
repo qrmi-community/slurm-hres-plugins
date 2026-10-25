@@ -1,0 +1,60 @@
+# resources.yaml - Hierarchical Resources (HRES) for Slurm 26.11 (master)
+#
+# Place in the same directory as slurm.conf. Read on slurmctld start and
+# on "scontrol reconfigure". Runtime changes made with "scontrol update
+# HRESName=..." are lost when this file is read again.
+#
+# Nodes: c1, c2
+# A resource name must not clash with a license in slurm.conf.
+---
+# ---------------------------------------------------------------------------
+# QPU backends: one resource per backend, one layer covering c[1-2]
+#   Every backend is reachable from both nodes, so the layer does not split
+#   nodes; the resource name selects the backend. Test:
+#   sbatch --license='ibm_kingston:1[foo=bar]' --wrap='hostname'
+#
+#   To add a backend, copy this entry and change "resource" and "backend".
+# ---------------------------------------------------------------------------
+- resource: ibm_kingston        # must be the first key; = backend name
+  mode: MODE_1                  # enough on ONE overlapping layer
+  disable_hres: false           # true = backend off, jobs pend (HRESDisabled)
+  plugin:
+    type: hres/lua              # only hres/lua exists for now
+    config:                     # handed to the plugin as-is (visible to users)
+      - name: path              # required by hres/lua
+        value: /etc/slurm/qrmi_hres.lua  # for 1st test /etc/slurm/hres_trace.lua
+      - name: qrmi_config       # QRMI resource definitions (controller + nodes)
+        value: /etc/slurm/qrmi_config.json
+      # qrmi.so is in /usr/lib64/lua/5.4, the default path: no lua_cpath needed
+      # - name: qrmi_resource   # QRMI name, default = this resource name
+      #   value: ibm_kingston
+      # - name: release         # deferred (default) | immediate
+      #   value: deferred
+      # - name: admission       # yes (default): hold jobs on QRMI status/slots
+      #   value: "yes"
+      # - name: status_max_age  # seconds; hold jobs if the status is older
+      #   value: "60"
+      # Per-user credentials (default: required). Each user keeps their API
+      # key in a qrmi_config.json style file; the site key in
+      # qrmi_config.json is then only used for status().
+      # - name: user_credentials  # required (default) | off
+      #   value: required
+      # - name: user_config       # %u = user name, %U = uid
+      #   value: /shared/qrmi/%u/config.json
+      - name: user_config
+        value: /qrmi-creds/%u/config.json
+      # - name: user_keys         # keys taken from the user's file
+      #   value: QRMI_IBM_QS_IAM_APIKEY,QRMI_IBM_QS_SERVICE_CRN
+      # - name: cred_fail         # hold (default): hold the job, cause in squeue
+      #   value: hold             # pend: keep jobs pending for cred_retry seconds
+      # - name: cred_retry        # seconds a user's jobs wait after a bad file
+      #   value: "300"
+    maintenance_cycle: 10       # also performs deferred releases; keep it short
+    maintenance_timeout: 10     # seconds before a slow call is logged; default 3
+  layers:
+    - layer_name: all           # no whitespace or , ; | : = ( ) *
+      nodes:
+        - "c[1-2]"
+      count: 1                  # concurrent jobs on this backend; -1 = unlimited
+      disable_layer: false      # true = this layer is not allocated from
+

@@ -1,0 +1,107 @@
+--[[
+  (C) Copyright IBM 2026
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+]]
+
+--[[
+job_submit_qrmi.lua - optional early check for qrmi_hres.lua (job_submit/lua)
+
+Rejects, at sbatch/salloc/srun time, a job that requests a QRMI resource
+while the user's credential file is missing or has unsafe permissions. It
+only checks the file's type, owner and mode; it never reads the keys.
+qrmi_hres.lua checks everything again when the job starts, so this is
+only for a clear, early error message.
+
+  slurm.conf: JobSubmitPlugins=lua
+  install as: /etc/slurm/job_submit.lua (or call qrmi_check() from yours)
+
+Keep QRMI_RESOURCES and USER_CONFIG in line with resources.yaml.
+]]
+
+local QRMI_RESOURCES = { ibm_kingston = true, ibm_boston = true }
+local USER_CONFIG = "/shared/qrmi/%u/config.json"
+
+local function shq(s)
+    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+local function user_name(uid)
+    local p = io.popen("getent passwd " .. tonumber(uid) .. " 2>/dev/null")
+    local line = p and p:read("*l")
+    if p then
+        p:close()
+    end
+    return line and line:match("^([^:]+):") or nil
+end
+
+-- "ibm_kingston:1[k=v],ibm_boston" -> { ibm_kingston, ibm_boston }
+local function requested(licenses)
+    local out = {}
+    local s = tostring(licenses or ""):gsub("%b[]", ""):gsub("%b()", "")
+    for item in s:gmatch("[^,;|]+") do
+        local name = item:match("^%s*([^:%s]+)")
+        if name and QRMI_RESOURCES[name] then
+            out[#out + 1] = name
+        end
+    end
+    return out
+end
+
+-- nil when fine, or a message for the user
+function qrmi_check(job_desc, submit_uid)
+    local names = requested(job_desc.licenses)
+    if #names == 0 then
+        return nil
+    end
+    local uid = (job_desc.user_id and job_desc.user_id ~= slurm.NO_VAL) and job_desc.user_id or submit_uid
+    local user = user_name(uid)
+    if not user then
+        return "qrmi: unknown user " .. tostring(uid)
+    end
+    local path = USER_CONFIG:gsub("%%u", user):gsub("%%U", tostring(uid))
+    local p = io.popen("stat -c '%F:%u:%a' " .. shq(path) .. " 2>/dev/null")
+    local info = p and p:read("*l")
+    if p then
+        p:close()
+    end
+    if not info then
+        return string.format("qrmi: %s needs your API key in %s (not found)", table.concat(names, ","), path)
+    end
+    local ftype, owner, mode = info:match("^(.-):(%d+):(%d+)$")
+    if ftype ~= "regular file" then
+        return "qrmi: " .. path .. " must be a regular file, not a " .. tostring(ftype)
+    end
+    if tonumber(owner) ~= tonumber(uid) then
+        return "qrmi: " .. path .. " must be owned by you"
+    end
+    if tonumber(mode, 8) & tonumber("022", 8) ~= 0 then
+        return "qrmi: " .. path .. " must not be writable by group or others (chmod 640)"
+    end
+    return nil
+end
+
+function slurm_job_submit(job_desc, part_list, submit_uid)
+    local msg = qrmi_check(job_desc, submit_uid)
+    if msg then
+        slurm.log_user(msg)
+        return slurm.ERROR
+    end
+    return slurm.SUCCESS
+end
+
+function slurm_job_modify(job_desc, job_rec, part_list, modify_uid)
+    return slurm.SUCCESS
+end
+
+return slurm.SUCCESS

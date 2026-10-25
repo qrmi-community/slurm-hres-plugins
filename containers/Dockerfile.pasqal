@@ -1,0 +1,12 @@
+# Slurm image with the Python environment for the Pasqal exercises
+#
+# Copies /opt/qrmi/venv from the OCS tutorial QRMI image (Rocky Linux 9, Python 3.12):
+# QRMI 0.26.3, Pulser 1.9.0 and the Pulser connection patch for EMU_FREE.
+# The QRMI SPANK plugin is not included: participants install it in Module 1.
+# Build the base image (compose.yml) and the OCS QRMI image first.
+ARG SLURM_IMAGE=slurm-docker-cluster:26.05.5-mpi-pmix
+ARG QRMI_IMAGE=localhost/sc26-ocs-qrmi:0.26.3
+FROM ${QRMI_IMAGE} AS qrmi
+
+FROM ${SLURM_IMAGE}
+COPY --from=qrmi /opt/qrmi/venv /opt/qrmi/venv
