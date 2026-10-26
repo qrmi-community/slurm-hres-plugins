@@ -92,5 +92,8 @@ done
 
 echo "export QRMI_JOB_QPU_RESOURCES=$resources"
 echo "export QRMI_JOB_QPU_TYPES=$types"
+# Older names, still read by CUDA-Q 0.16 and earlier; spank_qrmi sets both
+echo "export SLURM_JOB_QPU_RESOURCES=$resources"
+echo "export SLURM_JOB_QPU_TYPES=$types"
 echo "export QRMI_JOB_ID=$SLURM_JOB_ID"
 echo "export QRMI_JOB_UID=$(id -u)"
