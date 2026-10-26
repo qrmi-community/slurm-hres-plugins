@@ -6,7 +6,7 @@
 [![Lua 5.4+](https://img.shields.io/badge/lua-5.4%2B-blue.svg?logo=lua&logoColor=white)](https://www.lua.org/manual/5.4/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20650771.svg)](https://doi.org/10.5281/zenodo.20650771)
 
-Last updated: 2026-10-24
+Last updated: 2026-10-26
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
 
 ## Contents
@@ -335,7 +335,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `async_prerun` | Check the revoke marker → read the user's credential file → `acquire()` → save the token and the keys to files → check the revoke marker again → return the token as the payload. A bad file or an authentication error is recorded in `credfail/` and returns `ERROR` (requeue); other failures return `REMOTE_FAIL` |
 | `revoke` | Create a revoke marker and dispose of the token if there is one |
 | `controller_epilog` | Dispose of the token (payload, or the token file as a fallback) |
-| `node_job_prolog` | Create the **per-job** directory `env_dir/job_<id>/` (0700, owned by the user) and write `<qpu>.env` (site settings, without the user's keys), `<qpu>.type` and `<qpu>.user` (the path of the user's file and the key names to read) |
+| `node_job_prolog` | Create the **per-job** directory `env_dir/job_<id>/` (0700, owned by the user) and write `<qpu>.env` (the token, the job's time limit from `scontrol show job`, and the site settings without the user's keys), `<qpu>.type` and `<qpu>.user` (the path of the user's file and the key names to read) |
 | `node_job_epilog` | Remove `env_dir/job_<id>/` |
 | task callbacks | Nothing |
 
@@ -409,6 +409,7 @@ A QRMI handle releases its cached token when it is freed or garbage-collected. T
 
 ```
 <qpu>_QRMI_JOB_ACQUISITION_TOKEN
+<qpu>_QRMI_JOB_TIMEOUT_SECONDS                       (the job's time limit; UNLIMITED = 4294967295)
 <qpu>_<each key of environments in qrmi_config.json>     (site settings)
 <qpu>_<each allowed key in the user's file>               (read by the TaskProlog as the user)
 QRMI_JOB_QPU_RESOURCES / SLURM_JOB_QPU_RESOURCES
@@ -443,7 +444,7 @@ The named volume for the credentials (`qrmi_creds:/qrmi-creds`) is added in comp
 Notes:
 
 - `/etc/slurm` is a named volume (`etc_slurm`), so the volume must be recreated after the image changes.
-- Enabling HRES requires no slurm.conf change. slurmctld reads `resources.yaml` automatically if it sits next to slurm.conf (a syntax error is fatal).
+- Enabling HRES itself requires no slurm.conf change; this plugin still needs the TaskProlog and Epilog lines (0.1, step 5). slurmctld reads `resources.yaml` automatically if it sits next to slurm.conf (a syntax error is fatal).
 - `DebugFlags=License` helps with the initial checks.
 
 ---
@@ -471,7 +472,9 @@ Notes:
 | status() (site key), acquire(), release() | ✅ |
 | `squeue` pending reasons | ✅ `count` used up → `ReqNodeNotAvail, May be reserved for other job`; calibration → `HRESDisabled`; admission failure and credential wait → `Resources` |
 | Per-user credentials (`/qrmi-creds/<user>/config.json`, `user:slurm 640`) | ✅ acquire with the user's key → job runs → release with the user's key at the next maintenance. `release/` and `creds/` empty afterwards |
-| Wrong API key | ⚠️ The first version requeued in a loop → authentication errors are now treated as credential failures (checked with mocks, not yet on the cluster) |
+| Wrong API key | ✅ (2026-10-26) Held; `squeue` shows `hres_qrmi: ibm_kingston credentials: the backend rejected the API key in the user's file`. The first version requeued in a loop |
+| Unreadable file (`chmod 600`) | ✅ (2026-10-26) Held after one requeue (about 3 minutes); `squeue` shows `... /qrmi-creds/user/config.json is missing or not readable by SlurmUser`. Fixed on the way: the reader exited with status 1 under bash as `sh`, so the message first read `cannot be read (exit 1)` |
+| `<qpu>_QRMI_JOB_TIMEOUT_SECONDS` | ✅ (2026-10-26) `--time=30:00` → 1800, `--time=01:00:00` → 3600, no `--time` → the partition's limit (432000 = 5 days) |
 | `type` mismatch (user file `ibm-quantum-system`, site `ibm-quantum-compute-service`) | ✅ Pending (the log said the key was missing). Now reported as a type mismatch (checked with mocks) |
 | File on a bind mount (macOS host) | ❌ chown has no effect, so the owner check fails → moved to a named volume |
 
@@ -553,7 +556,7 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 
 ### 8.3 Other
 
-- Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file. `QRMI_JOB_TIMEOUT_SECONDS` is not supported.
+- Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file.
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
 - Do not enable spank_qrmi at the same time; it would acquire twice.
 - HRES as a whole is still beta, so the configuration format may change.
