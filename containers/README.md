@@ -29,6 +29,6 @@ See **[docs/INSTALL.md](docs/INSTALL.md)** for setup, verification, image detail
 | `cgroup.conf` | Slurm cgroup configuration; copied to `/etc/slurm` in the containers |
 | `qrmi_config.json.example` | Example QRMI configuration; copied to `/etc/slurm` in the containers |
 | `update_slurmfiles.sh` | Updates the Slurm configuration files in the containers from the host |
-| `compose.pasqal.yml`, `Dockerfile.pasqal` | Pasqal add-on: Pasqal Python environment, shared `/home` and a local Warden; see the [Pasqal hands-on](../../hands-on/module-2/pasqal/README.md#slurm) |
+| `compose.pasqal.yml`, `Dockerfile.pasqal` | Pasqal add-on: Pasqal Python environment (QRMI, Pulser), shared `/home` and a local Warden with a simulated QPU |
 | `docs/INSTALL.md` | Installation and reference guide |
 | `images/` | Cluster diagram (PNG) |
