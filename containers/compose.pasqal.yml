@@ -1,9 +1,9 @@
 # Pasqal add-on: the Pasqal Python environment on all Slurm nodes, a /home shared by
 # the login and compute nodes, and a local Warden with a simulated QPU
 #   docker compose -f compose.yml -f compose.pasqal.yml up -d
-# The QRMI SPANK plugin and /etc/slurm/qrmi_config.json come from Module 1.
+# qrmi_hres.lua and /etc/slurm/qrmi_config.json: see README.md
 x-pasqal: &pasqal
-  image: localhost/slurm-pasqal:0.26.3
+  image: localhost/slurm-pasqal:0.26.4-hres
 
 services:
   slurmdbd:
