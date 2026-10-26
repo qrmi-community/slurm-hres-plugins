@@ -22,7 +22,8 @@
 # wrote for the job on this node, with the same names as spank_qrmi:
 #
 #   <qpu>_QRMI_JOB_ACQUISITION_TOKEN, <qpu>_QRMI_..., QRMI_JOB_QPU_RESOURCES,
-#   QRMI_JOB_QPU_TYPES, QRMI_JOB_ID, QRMI_JOB_UID
+#   QRMI_JOB_QPU_TYPES, SLURM_JOB_QPU_RESOURCES, SLURM_JOB_QPU_TYPES,
+#   QRMI_JOB_ID, QRMI_JOB_UID
 #
 # With user credentials (user_credentials=required, the default), it also
 # exports the user's own keys, read here as the user from the file named in
@@ -92,7 +93,7 @@ done
 
 echo "export QRMI_JOB_QPU_RESOURCES=$resources"
 echo "export QRMI_JOB_QPU_TYPES=$types"
-# Older names, still read by CUDA-Q 0.16 and earlier; spank_qrmi sets both
+# Older names, still read by CUDA-Q (0.16); spank_qrmi sets both
 echo "export SLURM_JOB_QPU_RESOURCES=$resources"
 echo "export SLURM_JOB_QPU_TYPES=$types"
 echo "export QRMI_JOB_ID=$SLURM_JOB_ID"
