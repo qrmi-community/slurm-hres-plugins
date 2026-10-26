@@ -9,6 +9,8 @@
 Last updated: 2026-10-26
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
 
+<img width="640" height="320" alt="qrmi-social-preview-light" src="https://github.com/user-attachments/assets/0bf33597-8a5d-494c-922b-b8ad1034fa79" />
+
 ## Contents
 
 **Set up and use**
