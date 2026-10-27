@@ -561,6 +561,7 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 - Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file.
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
 - Do not enable spank_qrmi at the same time; it would acquire twice.
+- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`.
 - HRES as a whole is still beta, so the configuration format may change.
 - Jobs submitted with `podman exec login` run as root (uid=0). Use `-u user` to submit as a regular user when checking permissions.
 
