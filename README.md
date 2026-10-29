@@ -1,13 +1,21 @@
 # Slurm HRES Plugin for QRMI
 
+Last updated: 2026-10-29
+Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
+
 [![License](https://img.shields.io/github/license/qiskit-community/qrmi.svg?)](https://opensource.org/licenses/Apache-2.0) <!--- long-description-skip-begin -->
 [![Current Release](https://img.shields.io/github/release/qrmi-community/slurm-hres-plugins.svg?)](https://github.com/qrmi-community/slurm-hres-plugins/releases)
 ![Platform](https://img.shields.io/badge/%F0%9F%92%BB_Platform-Linux-blue)
 [![Lua 5.4+](https://img.shields.io/badge/lua-5.4%2B-blue.svg?logo=lua&logoColor=white)](https://www.lua.org/manual/5.4/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20650771.svg)](https://doi.org/10.5281/zenodo.20650771)
 
-Last updated: 2026-10-29
-Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
+Slurm HRES Plugin for QRMI lets the Slurm workload manager schedule quantum processors (QPUs) alongside CPUs and GPUs. It is a plugin for the Hierarchical Resources (HRES) interface of Slurm (hres/lua, introduced in Slurm 26.11 and currently in beta), built on QRMI, the Quantum Resource Management Interface.
+
+Each QPU backend is configured as an HRES resource that jobs request with --license. Slurm checks the backend's availability before it allocates nodes, so jobs wait in the queue instead of holding classical resources idle. The plugin acquires the QPU for the job, passes the session to the job through the same environment variables as the earlier SPANK-based plugin (spank_qrmi), and releases it after the job ends. Calls to the quantum service are kept out of the scheduler's critical path, and each user keeps their own API key in a file they manage.
+
+This release contains the hres/lua plugin (qrmi_hres.lua), a TaskProlog, an administration tool for per-user credential directories, an optional job_submit/lua check, a container-based Slurm cluster for testing, and design and verification notes. It is intended as a reference implementation for integrating quantum resources with Slurm through HRES.
+
+Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later, Lua 5.4.
 
 ## Contents
 
