@@ -6,10 +6,8 @@
 [![Lua 5.4+](https://img.shields.io/badge/lua-5.4%2B-blue.svg?logo=lua&logoColor=white)](https://www.lua.org/manual/5.4/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20650771.svg)](https://doi.org/10.5281/zenodo.20650771)
 
-Last updated: 2026-10-26
+Last updated: 2026-10-29
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
-
-<img width="640" height="320" alt="qrmi-social-preview-light" src="https://github.com/user-attachments/assets/0bf33597-8a5d-494c-922b-b8ad1034fa79" />
 
 ## Contents
 
@@ -115,6 +113,8 @@ hres_qrmi: ibm_kingston: QRMI resource ibm_kingston type=ibm-quantum-compute-ser
 ```
 
 The `type=` and `user_keys=` values are what users need for step 0.3.
+
+If the log shows `hres_qrmi: <res>: ..., disabling the resource` instead, the plugin could not read the resource's definition, and jobs on it wait with reason `HRESDisabled`. Check that `qrmi_config.json` is owned by `root:slurm` with mode 640 (SlurmUser must be able to read it) and that it defines the resource, then run `scontrol reconfigure`.
 
 ### 0.2 Add a user (admin, once per user)
 
