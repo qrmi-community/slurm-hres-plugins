@@ -344,7 +344,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `async_prerun` | Check the revoke marker → read the user's credential file → `acquire()` → save the token and the keys to files → check the revoke marker again → return the token as the payload. A bad file or an authentication error is recorded in `credfail/` and returns `ERROR` (requeue); other failures return `REMOTE_FAIL` |
 | `revoke` | Create a revoke marker and dispose of the token if there is one |
 | `controller_epilog` | Dispose of the token (payload, or the token file as a fallback) |
-| `node_job_prolog` | Create the **per-job** directory `env_dir/job_<id>/` (0700, owned by the user) and write `<qpu>.env` (the token, the job's time limit from `scontrol show job`, and the site settings without the user's keys), `<qpu>.type` and `<qpu>.user` (the path of the user's file and the key names to read) |
+| `node_job_prolog` | Create the **per-job** directory `env_dir/job_<id>/` (0700, owned by the user) and write `<qpu>.env` (the token, the job's count of the resource, the job's time limit from `scontrol show job`, and the site settings without the user's keys), `<qpu>.type` and `<qpu>.user` (the path of the user's file and the key names to read) |
 | `node_job_epilog` | Remove `env_dir/job_<id>/` |
 | task callbacks | Nothing |
 
@@ -418,6 +418,8 @@ A QRMI handle releases its cached token when it is freed or garbage-collected. T
 
 ```
 <qpu>_QRMI_JOB_ACQUISITION_TOKEN
+<qpu>_QRMI_JOB_QPU_SLOTS                            (the job's count of the resource; not in spank_qrmi, see below)
+423,424d428
 <qpu>_QRMI_JOB_TIMEOUT_SECONDS                       (the job's time limit; UNLIMITED = 4294967295)
 <qpu>_<each key of environments in qrmi_config.json>     (site settings)
 <qpu>_<each allowed key in the user's file>               (read by the TaskProlog as the user)
@@ -426,6 +428,7 @@ QRMI_JOB_QPU_TYPES     / SLURM_JOB_QPU_TYPES
 QRMI_JOB_ID, QRMI_JOB_UID
 ```
 
+`<qpu>_QRMI_JOB_QPU_SLOTS` is the count the job requested for that resource (`--license=ibm_kingston:2` → `ibm_kingston_QRMI_JOB_QPU_SLOTS=2`; 1 when no count is given), so each QRMI resource can read its own. QRMI cannot read Slurm's own `SLURM_JOB_LICENSES`, as it does not depend on a resource manager. spank_qrmi does not set it yet.
 slurm.conf needs:
 
 ```

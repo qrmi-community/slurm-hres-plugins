@@ -1029,6 +1029,8 @@ end
 -- Same variables as spank_qrmi, one file per resource:
 --   <name>_QRMI_JOB_ACQUISITION_TOKEN, <name>_QRMI_JOB_TIMEOUT_SECONDS,
 --   <name>_<each site environment entry>
+-- and <name>_QRMI_JOB_QPU_SLOTS (not set by spank_qrmi): the job's count of
+-- the resource (ibm_kingston:2 -> 2).
 -- plus <name>.type for QRMI_JOB_QPU_TYPES. With user credentials the
 -- site's values of user_keys are left out, and <name>.user tells the
 -- TaskProlog (running as the user) which file and keys to export.
@@ -1064,7 +1066,10 @@ function hres_node_job_prolog(prep, job)
 
     local name = def.name
     local env = merged_env(prep.config, def, nil)
-    local lines = { string.format("%s_QRMI_JOB_ACQUISITION_TOKEN=%s", name, prep.payload) }
+    local lines = {
+        string.format("%s_QRMI_JOB_ACQUISITION_TOKEN=%s", name, prep.payload),
+        string.format("%s_QRMI_JOB_QPU_SLOTS=%d", name, requested_slots(prep)),
+    }
     local timeout, limit = job_timeout_seconds(job.job_id)
     if timeout then
         lines[#lines + 1] = string.format("%s_QRMI_JOB_TIMEOUT_SECONDS=%d", name, timeout)
