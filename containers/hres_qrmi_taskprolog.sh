@@ -25,7 +25,7 @@
 #   QRMI_JOB_QPU_TYPES, QRMI_JOB_ID, QRMI_JOB_UID
 #
 # and <qpu>_QRMI_JOB_QPU_SLOTS, which spank_qrmi does not set: the count the
-# job requested for the resource (--license=ibm_kingston:2 -> 2).
+# job requested for the resource (--licenses=ibm_kingston:2 -> 2).
 #
 # With user credentials (user_credentials=required, the default), it also
 # exports the user's own keys, read here as the user from the file named in
