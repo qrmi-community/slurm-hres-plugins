@@ -328,7 +328,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `user_required` | The `user_keys` ending in `APIKEY` or `AUTH_TOKEN` | Keys that must be in the user's file |
 | `cred_retry` | `300` | Seconds a credential failure is remembered: within it, the next pre-run of the user's jobs holds them (`hold`) or keeps them pending (`pend`) |
 | `cred_fail` | `hold` | After a credential failure: `hold` holds the job with the cause as its reason (shown by `squeue`); `pend` keeps the user's jobs pending (reason `Resources`) for `cred_retry` seconds |
-| `release_give_up` | `86400` | Seconds after which a release that keeps failing is dropped (and logged) |
+| `release_give_up` | `86400` | Seconds after the first failed release after which a release that keeps failing is dropped (and logged) |
 
 ---
 
@@ -341,9 +341,9 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `create_context` | Create `state_dir` and check that the resource is defined in `qrmi_config.json`. If not, return `ESLURM_HRES_MAINTENANCE_DISABLE` (all layers disabled, slurmctld keeps running) |
 | `maintenance` | ① Process the release queue (failures are retried next cycle) ② Delete revoke markers older than a day ③ Cache the result of `status()` ④ Enable or disable the layers |
 | `prerun` | If a credential failure marker (`credfail/`) is newer than `cred_retry`, hold the job with the cause as its reason (`cred_fail=hold`: a Lua error whose message Slurm stores as the reason) or return `REMOTE_FAIL` (`cred_fail=pend`). Then the admission check against the status cache (5.2). If it fails, return `REMOTE_FAIL` (job stays pending) |
-| `async_prerun` | Check the revoke marker → read the user's credential file → `acquire()` → save the token and the keys to files → check the revoke marker again → return the token as the payload. A bad file or an authentication error is recorded in `credfail/` and returns `ERROR` (requeue); other failures return `REMOTE_FAIL` |
-| `revoke` | Create a revoke marker and dispose of the token if there is one |
-| `controller_epilog` | Dispose of the token (payload, or the token file as a fallback) |
+| `async_prerun` | Check the revoke marker → read the user's credential file → `acquire()` → save the token and the keys to files → check the revoke marker again (if the run was revoked or ended meanwhile, release the token) → return the token as the payload. A bad file or an authentication error is recorded in `credfail/` and returns `ERROR` (requeue); other failures return `REMOTE_FAIL` |
+| `revoke` | Create a revoke marker and queue the token for release, if there is one (`tokens/` → `release/`) |
+| `controller_epilog` | Same as `revoke`. Slurm also calls it when a job ends while the async pre-run is still acquiring (e.g. `scancel` while CONFIGURING); the marker makes the pre-run release the token it gets |
 | `node_job_prolog` | Create the **per-job** directory `env_dir/job_<id>/` (0700, owned by the user) and write `<qpu>.env` (the token, the job's count of the resource, the job's time limit from `scontrol show job`, and the site settings without the user's keys), `<qpu>.type` and `<qpu>.user` (the path of the user's file and the key names to read) |
 | `node_job_epilog` | Remove `env_dir/job_<id>/` |
 | task callbacks | Nothing |
@@ -386,19 +386,19 @@ The trade-off: the information used for admission can be up to `maintenance_cycl
 | Path | Content |
 |---|---|
 | `tokens/<resource>.<jobid>.<sluid>` | Token of an acquired run |
-| `revoked/<resource>.<jobid>.<sluid>` | Revoke marker (the async pre-run checks it and gives up) |
-| `release/<resource>.<jobid>.<sluid>` | Token waiting for release |
+| `revoked/<resource>.<jobid>.<sluid>` | The run was revoked or ended (the async pre-run checks it and gives up) |
+| `release/<resource>.<jobid>.<sluid>` | Token waiting for release. Moved here from `tokens/` with a rename, so a token is queued once even when the async pre-run and a revoke or epilog race. Whoever releases it first moves it to `tmp/<key>.releasing`, so maintenance and an immediate release never both release it; a failed release moves it back. `<key>.since` records when maintenance first failed to release it, for `release_give_up` |
 | `status/<resource>` | Status cache (`time=`, `status=`, `healthy=`, `busy=`, `available=`, `max=`, `reason=`) |
 | `creds/<resource>.<jobid>.<sluid>` | The user's keys used for acquire; used for the release, then removed |
 | `credfail/<resource>.<uid>` | Credential failure marker with the cause (no secrets); read by the next pre-run (`cred_fail`) |
-| `tmp/` | Short-lived copy of the user's file for QRMI to parse (removed right after) |
+| `tmp/` | Short-lived copy of the user's file for QRMI to parse (removed right after), and `<key>.releasing`: a token being released. Maintenance queues a `.releasing` file older than an hour again (slurmctld stopped while releasing) |
 
 A run is identified by the `job_id` and `sluid` pair. A requeue changes the sluid, so it is treated as a new run.
 
 **Operating notes**
 
 - **Normal state:** with no job running and nothing waiting for release, only `status/` has files (and `revoked/` markers younger than a day). Anything left in `tokens/`, `creds/` or `release/` belongs to a running job or a release that keeps failing; the log says why (`release ... failed`).
-- **Safe to delete:** `credfail/<res>.<uid>`, to let a user's jobs try again at once. `tmp/` holds copies of user files only for a moment; a file left there after a crash can be deleted.
+- **Safe to delete:** `credfail/<res>.<uid>`, to let a user's jobs try again at once. `tmp/` holds copies of user files only for a moment; such a file left there after a crash can be deleted, but not a `*.releasing` file (a token).
 - **Do not delete:** `tokens/`, `creds/` and `release/`. Without them the plugin cannot release the token, and it stays acquired on the backend. A release that keeps failing is dropped after `release_give_up` (default one day) and logged.
 - **Secrets:** `creds/<key>` holds the user's API key in clear text from acquire until the release succeeds, and `tmp/` holds it for a moment while it is parsed. The directory is owned by SlurmUser, mode 0700, and the files 0600. Anyone who can read state_dir as root or SlurmUser, and any backup or copy of it (on the container cluster, the `var_spool_slurmctld` volume), can read those keys. So users manage their keys themselves, but the site also holds each key for the length of a job.
 
