@@ -208,7 +208,7 @@ Credential problems appear as the job's reason in `squeue` (with `cred_fail=hold
 | `type of <res> is X, but the site defines it as Y` | Change `type` to the site's value |
 | `... lacks QRMI_..._IAM_APIKEY for <res>` | Check the key names and `name` |
 | Authentication error at acquire (401, 403, ...) | Wrong API key or CRN |
-| `rejected by the backend: ...` | The backend refused the job's user without a user key, e.g. Warden (Pasqal Local): the user is not in `api.authorized_users`, SlurmUser is not in `api.admin_users`, or Warden cannot decode the MUNGE credential (another MUNGE key). The admin fixes the cause |
+| `rejected by the backend: ...` | The backend refused the job's user without a user key (401 or 403), e.g. Warden (Pasqal Local): the user is not in `api.authorized_users`, or SlurmUser is not in `api.admin_users`. The admin fixes the cause. The reason shows the first 200 characters of the answer; slurmctld.log has all of it. A MUNGE error (e.g. Warden has another MUNGE key) is not held: the user's jobs stay pending (`Resources`) for `cred_retry` seconds, then try again |
 
 After fixing the file, resubmit the held job. With `cred_fail=pend`, the job is retried automatically once `cred_retry` (default 300 s) has passed; to retry at once, the admin runs `rm /var/spool/slurmctld/hres_qrmi/credfail/<res>.<uid>` on slurmctld.
 
@@ -572,7 +572,7 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 - Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file.
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
 - Do not enable spank_qrmi at the same time; it would acquire twice.
-- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401, 403 or MUNGE), the job is held with Warden's answer as its reason, as for a credential failure.
+- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401 or 403), the job is held with Warden's answer as its reason, as for a credential failure; a MUNGE error keeps the user's jobs pending for `cred_retry` seconds instead.
 - HRES as a whole is still beta, so the configuration format may change.
 - Jobs submitted with `podman exec login` run as root (uid=0). Use `-u user` to submit as a regular user when checking permissions.
 

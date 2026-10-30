@@ -701,7 +701,6 @@ local AUTH_PATTERNS = {
     "apikey",
     "%f[%d]401%f[%D]",
     "%f[%d]403%f[%D]",
-    "munge", -- Warden cannot decode the MUNGE credential (e.g. another key)
 }
 
 local function is_auth_error(err)
@@ -874,7 +873,8 @@ function hres_controller_job_prerun(ctx, job, prep)
         local t = tonumber(s:match("time=(%d+)")) or 0
         local msg = s:match("msg=([^\n]*)") or "invalid"
         local fresh = os.time() - t < tonumber(opt(ctx.config, "cred_retry"))
-        if fresh and opt(ctx.config, "cred_fail") == "hold" then
+        -- pend=1: a MUNGE error, possibly transient: never an admin hold
+        if fresh and opt(ctx.config, "cred_fail") == "hold" and not s:match("pend=1") then
             -- An error with a message holds the job, and Slurm
             -- shows the message as its reason in squeue. The
             -- hold stops the loop, so the next job (or this one,
@@ -943,13 +943,18 @@ function hres_controller_job_async_prerun(ctx, job, prep)
         -- A rejected key or user will not get better by retrying: treat it
         -- like a bad credential file, so the user's jobs wait cred_retry.
         -- Without user keys this is the backend's answer, e.g. Warden
-        -- refusing the job's user or SlurmUser (MUNGE).
-        if is_auth_error(aerr) then
-            local why = user_env and "the backend rejected the API key in the user's file"
-                or ("rejected by the backend: " .. tostring(aerr):gsub("\n", " "))
+        -- refusing the job's user or SlurmUser. A MUNGE error (e.g. Warden
+        -- has another MUNGE key, or munged is restarting) only keeps the
+        -- user's jobs pending, as with cred_fail=pend.
+        local e = tostring(aerr)
+        local munge = e:lower():find("munge", 1, true)
+        if munge or is_auth_error(e) then
+            -- The reason is shown by squeue; the full answer is in the log above
+            local why = (user_env and not munge) and "the backend rejected the API key in the user's file"
+                or ("rejected by the backend: " .. (e:gsub("%s+", " ")):sub(1, 200))
             write_file(
                 credfail_path(ctx.config, ctx.name, job.user_id),
-                string.format("time=%d\nmsg=%s\n", os.time(), why)
+                string.format("time=%d\nmsg=%s\n%s", os.time(), why, munge and "pend=1\n" or "")
             )
             return slurm.ERROR
         end
@@ -968,6 +973,8 @@ function hres_controller_job_async_prerun(ctx, job, prep)
         return slurm.ESLURM_HRES_REMOTE_FAIL
     end
 
+    -- The backend accepts this user again (e.g. an admin fixed Warden)
+    os.remove(credfail_path(ctx.config, ctx.name, job.user_id))
     log("JobId=%d %s: acquired%s", job.job_id, ctx.name, user_env and " with the user's credentials" or "")
     return slurm.SUCCESS, token
 end
