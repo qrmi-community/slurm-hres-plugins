@@ -208,6 +208,7 @@ Credential problems appear as the job's reason in `squeue` (with `cred_fail=hold
 | `type of <res> is X, but the site defines it as Y` | Change `type` to the site's value |
 | `... lacks QRMI_..._IAM_APIKEY for <res>` | Check the key names and `name` |
 | Authentication error at acquire (401, 403, ...) | Wrong API key or CRN |
+| `rejected by the backend: ...` | The backend refused the job's user without a user key (401 or 403), e.g. Warden (Pasqal Local): the user is not in `api.authorized_users`, or SlurmUser is not in `api.admin_users`. The admin fixes the cause. The reason shows the first 200 characters of the answer; slurmctld.log has all of it. A MUNGE error (e.g. Warden has another MUNGE key) is not held: the user's jobs stay pending (`Resources`) for `cred_retry` seconds, then try again |
 
 After fixing the file, resubmit the held job. With `cred_fail=pend`, the job is retried automatically once `cred_retry` (default 300 s) has passed; to retry at once, the admin runs `rm /var/spool/slurmctld/hres_qrmi/credfail/<res>.<uid>` on slurmctld.
 
@@ -322,7 +323,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `auto_disable` | `yes` | Toggle `disable_layer` from status (overrides a manual DisableLayer) |
 | `admission` | `yes` | Run the admission check in the pre-run |
 | `status_max_age` | `60` | Max age of the status cache in seconds; keep above `maintenance_cycle` |
-| `user_credentials` | `required` | `required`: per-user credentials (8.2). `off`: the site key for every job (as spank_qrmi) |
+| `user_credentials` | `required` | `required`: per-user credentials (8.2) for types with user keys (`user_keys`, or the type's default); `pasqal-local` has none, as Warden identifies the job's user by MUNGE, so it needs no user file. `off`: the site key for every job (as spank_qrmi) |
 | `user_config` | `/shared/qrmi/%u/config.json` | Path of the user's file. `%u` = user name, `%U` = uid |
 | `user_keys` | Per-type default | Keys taken from the user's file (comma-separated). By default the API key and the service CRN |
 | `user_required` | The `user_keys` ending in `APIKEY` or `AUTH_TOKEN` | Keys that must be in the user's file |
@@ -419,7 +420,6 @@ A QRMI handle releases its cached token when it is freed or garbage-collected. T
 ```
 <qpu>_QRMI_JOB_ACQUISITION_TOKEN
 <qpu>_QRMI_JOB_QPU_SLOTS                            (the job's count of the resource; not in spank_qrmi, see below)
-423,424d428
 <qpu>_QRMI_JOB_TIMEOUT_SECONDS                       (the job's time limit; UNLIMITED = 4294967295)
 <qpu>_<each key of environments in qrmi_config.json>     (site settings)
 <qpu>_<each allowed key in the user's file>               (read by the TaskProlog as the user)
@@ -429,6 +429,7 @@ QRMI_JOB_ID, QRMI_JOB_UID
 ```
 
 `<qpu>_QRMI_JOB_QPU_SLOTS` is the count the job requested for that resource (`--license=ibm_kingston:2` → `ibm_kingston_QRMI_JOB_QPU_SLOTS=2`; 1 when no count is given), so each QRMI resource can read its own. QRMI cannot read Slurm's own `SLURM_JOB_LICENSES`, as it does not depend on a resource manager. spank_qrmi does not set it yet.
+
 slurm.conf needs:
 
 ```
@@ -571,7 +572,7 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 - Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file.
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
 - Do not enable spank_qrmi at the same time; it would acquire twice.
-- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`.
+- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401 or 403), the job is held with Warden's answer as its reason, as for a credential failure; a MUNGE error keeps the user's jobs pending for `cred_retry` seconds instead.
 - HRES as a whole is still beta, so the configuration format may change.
 - Jobs submitted with `podman exec login` run as root (uid=0). Use `-u user` to submit as a regular user when checking permissions.
 

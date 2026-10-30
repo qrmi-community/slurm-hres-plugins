@@ -261,8 +261,13 @@ local function run_key(hres_name, job)
     return string.format("%s.%s.%s", hres_name, tostring(job.job_id), tostring(job.sluid))
 end
 
-local function user_creds_on(config)
-    return opt(config, "user_credentials") ~= "off"
+-- Per-user credentials apply to types with user keys. pasqal-local has
+-- none: Warden identifies the job's user by MUNGE, not by a key.
+local function user_creds_on(config, def)
+    if opt(config, "user_credentials") == "off" then
+        return false
+    end
+    return (config and config.user_keys and config.user_keys ~= "") or USER_KEYS_BY_TYPE[def.type] ~= nil
 end
 
 local function user_name(uid)
@@ -358,7 +363,7 @@ local function merged_env(config, def, user_env)
     for k, v in pairs(def.environments or {}) do
         env[k] = v
     end
-    if user_creds_on(config) then
+    if user_creds_on(config, def) then
         local allowed = user_keys(config, def)
         for _, k in ipairs(allowed) do
             env[k] = nil
@@ -647,7 +652,8 @@ local function release_run(config, hres_name, key, token)
     local env, uid = text_to_env(read_file(cpath))
     local job = { user_id = uid or 0, job_id = tonumber(key:sub(#hres_name + 2):match("^(%d+)")) or 0 }
     local ok, err = release_token(config, hres_name, token, env, job)
-    if not ok and uid and user_creds_on(config) then
+    -- uid is recorded only when acquire used the user's keys
+    if not ok and uid then
         local fresh = load_user_env(config, hres_name, uid, state_path(config, "tmp", key .. ".release"))
         if fresh then
             ok, err = release_token(config, hres_name, token, fresh, job)
@@ -768,11 +774,11 @@ function hres_create_context(ctx, layers)
         def.name,
         tostring(def.type),
         opt(ctx.config, "release"),
-        opt(ctx.config, "user_credentials"),
+        user_creds_on(ctx.config, def) and "required" or "off",
         table.concat(allowed, ","),
         table.concat(required, ",")
     )
-    if user_creds_on(ctx.config) and #required == 0 then
+    if user_creds_on(ctx.config, def) and #required == 0 then
         log_err(
             "%s: user_credentials is on but no required user key is known for type %s; set user_keys/user_required",
             ctx.name,
@@ -921,26 +927,25 @@ end
 -- Under the slurmctld job lock: no network and no shared file system here,
 -- only local files under state_dir. acquire is in the asynchronous pre-run.
 function hres_controller_job_prerun(ctx, job, prep)
-    if user_creds_on(ctx.config) then
-        local fpath = credfail_path(ctx.config, ctx.name, job.user_id)
-        local s = read_file(fpath)
-        if s then
-            local t = tonumber(s:match("time=(%d+)")) or 0
-            local msg = s:match("msg=([^\n]*)") or "invalid"
-            local fresh = os.time() - t < tonumber(opt(ctx.config, "cred_retry"))
-            if fresh and opt(ctx.config, "cred_fail") == "hold" then
-                -- An error with a message holds the job, and Slurm
-                -- shows the message as its reason in squeue. The
-                -- hold stops the loop, so the next job (or this one,
-                -- once released) reads the user's file again.
-                os.remove(fpath)
-                log("JobId=%d %s held: credentials: %s", job.job_id, ctx.name, msg)
-                error(string.format("%s: %s credentials: %s", TAG, ctx.name, msg), 0)
-            end
-            if fresh then
-                slurm.log_debug("%s: JobId=%d %s held: credentials: %s", TAG, job.job_id, ctx.name, msg)
-                return slurm.ESLURM_HRES_REMOTE_FAIL
-            end
+    local fpath = credfail_path(ctx.config, ctx.name, job.user_id)
+    local s = read_file(fpath)
+    if s then
+        local t = tonumber(s:match("time=(%d+)")) or 0
+        local msg = s:match("msg=([^\n]*)") or "invalid"
+        local fresh = os.time() - t < tonumber(opt(ctx.config, "cred_retry"))
+        -- pend=1: a MUNGE error, possibly transient: never an admin hold
+        if fresh and opt(ctx.config, "cred_fail") == "hold" and not s:match("pend=1") then
+            -- An error with a message holds the job, and Slurm
+            -- shows the message as its reason in squeue. The
+            -- hold stops the loop, so the next job (or this one,
+            -- once released) tries again.
+            os.remove(fpath)
+            log("JobId=%d %s held: credentials: %s", job.job_id, ctx.name, msg)
+            error(string.format("%s: %s credentials: %s", TAG, ctx.name, msg), 0)
+        end
+        if fresh then
+            slurm.log_debug("%s: JobId=%d %s held: credentials: %s", TAG, job.job_id, ctx.name, msg)
+            return slurm.ESLURM_HRES_REMOTE_FAIL
         end
     end
     if opt(ctx.config, "admission") ~= "yes" then
@@ -963,8 +968,13 @@ function hres_controller_job_async_prerun(ctx, job, prep)
         return slurm.ESLURM_HRES_REMOTE_FAIL
     end
 
+    local def, derr = resource_def(ctx.config, ctx.name)
+    if not def then
+        log_err("JobId=%d %s: %s", job.job_id, ctx.name, derr)
+        return slurm.ESLURM_HRES_REMOTE_FAIL
+    end
     local user_env
-    if user_creds_on(ctx.config) then
+    if user_creds_on(ctx.config, def) then
         local uerr
         user_env, uerr = load_user_env(ctx.config, ctx.name, job.user_id, state_path(ctx.config, "tmp", key))
         local fpath = credfail_path(ctx.config, ctx.name, job.user_id)
@@ -990,12 +1000,21 @@ function hres_controller_job_async_prerun(ctx, job, prep)
         res:free()
         log_err("JobId=%d %s: acquire failed: %s", job.job_id, ctx.name, tostring(aerr))
         os.remove(state_path(ctx.config, "creds", key))
-        -- A rejected user key will not get better by retrying: treat it
+        -- A rejected key or user will not get better by retrying: treat it
         -- like a bad credential file, so the user's jobs wait cred_retry.
-        if user_env and is_auth_error(aerr) then
+        -- Without user keys this is the backend's answer, e.g. Warden
+        -- refusing the job's user or SlurmUser. A MUNGE error (e.g. Warden
+        -- has another MUNGE key, or munged is restarting) only keeps the
+        -- user's jobs pending, as with cred_fail=pend.
+        local e = tostring(aerr)
+        local munge = e:lower():find("munge", 1, true)
+        if munge or is_auth_error(e) then
+            -- The reason is shown by squeue; the full answer is in the log above
+            local why = (user_env and not munge) and "the backend rejected the API key in the user's file"
+                or ("rejected by the backend: " .. (e:gsub("%s+", " ")):sub(1, 200))
             write_file(
                 credfail_path(ctx.config, ctx.name, job.user_id),
-                string.format("time=%d\nmsg=%s\n", os.time(), "the backend rejected the API key in the user's file")
+                string.format("time=%d\nmsg=%s\n%s", os.time(), why, munge and "pend=1\n" or "")
             )
             return slurm.ERROR
         end
@@ -1024,6 +1043,8 @@ function hres_controller_job_async_prerun(ctx, job, prep)
         return slurm.ESLURM_HRES_REMOTE_FAIL
     end
 
+    -- The backend accepts this user again (e.g. an admin fixed Warden)
+    os.remove(credfail_path(ctx.config, ctx.name, job.user_id))
     log("JobId=%d %s: acquired%s", job.job_id, ctx.name, user_env and " with the user's credentials" or "")
     return slurm.SUCCESS, token
 end
@@ -1163,7 +1184,7 @@ function hres_node_job_prolog(prep, job)
         [string.format("%s/%s.env", dir, name)] = table.concat(lines, "\n") .. "\n",
         [string.format("%s/%s.type", dir, name)] = tostring(def.type) .. "\n",
     }
-    if user_creds_on(prep.config) then
+    if user_creds_on(prep.config, def) then
         local upath = user_config_path(prep.config, job.user_id)
         local allowed = user_keys(prep.config, def)
         if upath then
