@@ -29,9 +29,7 @@
     {
       "name": "EMU_FREE",
       "type": "pasqal-cloud",
-      "environment": {
-        "PASQAL_CONFIG_ROOT": "/home/user"
-      }
+      "environment": {}
     },
     {
       "name": "PASQAL_LOCAL",

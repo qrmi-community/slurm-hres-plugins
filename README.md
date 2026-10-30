@@ -323,7 +323,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `auto_disable` | `yes` | Toggle `disable_layer` from status (overrides a manual DisableLayer) |
 | `admission` | `yes` | Run the admission check in the pre-run |
 | `status_max_age` | `60` | Max age of the status cache in seconds; keep above `maintenance_cycle` |
-| `user_credentials` | `required` | `required`: per-user credentials (8.2) for types with user keys (`user_keys`, or the type's default); `pasqal-local` has none, as Warden identifies the job's user by MUNGE, so it needs no user file. `off`: the site key for every job (as spank_qrmi) |
+| `user_credentials` | `required` | `required`: per-user credentials (8.2) for types with user keys (`user_keys`, or the type's default); `pasqal-local` and `pasqal-cloud` have none (Pasqal Local: Warden identifies the job's user by MUNGE; Pasqal Cloud: the job reads the user's Pasqal config file, see 8.3), so they need no user file. `off`: the site key for every job (as spank_qrmi) |
 | `user_config` | `/shared/qrmi/%u/config.json` | Path of the user's file. `%u` = user name, `%U` = uid |
 | `user_keys` | Per-type default | Keys taken from the user's file (comma-separated). By default the API key and the service CRN |
 | `user_required` | The `user_keys` ending in `APIKEY` or `AUTH_TOKEN` | Keys that must be in the user's file |
@@ -573,6 +573,12 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
 - Do not enable spank_qrmi at the same time; it would acquire twice.
 - Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401, 403 or MUNGE), the job is held with Warden's answer as its reason, as for a credential failure.
+- Pasqal Cloud: the controller needs no credentials (`status()` uses a public endpoint; `acquire()` and `release()` do nothing for this type). The job's QRMI authenticates with the user's Pasqal config file (`username`/`password`, `client_id`/`client_secret` or `token`, and `project_id`), the first one found of:
+  1. `$PASQAL_CONFIG_ROOT/.pasqal/config`, set by the user in the job's environment
+  2. `$<qpu>_PASQAL_CONFIG_ROOT/.pasqal/config`: a site sets it with `PASQAL_CONFIG_ROOT` in the resource's `environment` in `qrmi_config.json`, which the TaskProlog exports with the resource prefix. `~` and `$VAR` are expanded in the job; use `$HOME/...` rather than `$USER`, which is not always set (e.g. jobs submitted from `podman exec`)
+  3. `$HOME/.pasqal/config`, the default
+
+  A root without a config file falls back to the next one without a warning, so check the path with `RUST_LOG=debug` (`Reading Pasqal config file: ...`). `$HOME` must be readable on the compute nodes. A missing or wrong config file shows as an authentication error in the job's output, not as a held job. To use per-user credential files (8.2) for Pasqal Cloud instead, set `user_keys` (e.g. `QRMI_PASQAL_CLOUD_AUTH_TOKEN,QRMI_PASQAL_CLOUD_PROJECT_ID`) in the resource's plugin config.
 - HRES as a whole is still beta, so the configuration format may change.
 - Jobs submitted with `podman exec login` run as root (uid=0). Use `-u user` to submit as a regular user when checking permissions.
 
