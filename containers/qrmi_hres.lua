@@ -252,16 +252,6 @@ local function split_list(s)
     return out
 end
 
-local function file_age(path)
-    local p = io.popen("stat -c %Y " .. shq(path) .. " 2>/dev/null")
-    if not p then
-        return nil
-    end
-    local m = tonumber(p:read("*l") or "")
-    p:close()
-    return m and (os.time() - m) or nil
-end
-
 local function qrmi_name(config, hres_name)
     return (config and config.qrmi_resource ~= "" and config.qrmi_resource) or hres_name
 end
@@ -680,18 +670,17 @@ end
 -- Release the queued token release/<key>. The file is claimed first (moved
 -- to tmp/), so maintenance and an immediate release never both release it.
 -- Returns nil if another thread claimed it; on failure the token goes back
--- to release/ for maintenance to retry. The claim touches the file, so its
--- age is the claim's (see maintenance).
+-- to release/ for maintenance to retry.
 local function release_queued(config, hres_name, key)
     local queued = state_path(config, "release", key)
     local claimed = state_path(config, "tmp", key .. ".releasing")
     if not os.rename(queued, claimed) then
         return nil
     end
-    sh("touch " .. shq(claimed))
     local ok, err = release_run(config, hres_name, key, read_file(claimed))
     if ok then
         os.remove(claimed)
+        os.remove(queued .. ".since")
         log("released %s", key)
         return true
     end
@@ -803,14 +792,22 @@ function hres_maintenance(ctx, layers)
     local rdir = opt(ctx.config, "state_dir") .. "/release"
     local give_up = tonumber(opt(ctx.config, "release_give_up"))
     for _, key in ipairs(list_dir(rdir)) do
-        if key:sub(1, #prefix) == prefix then
+        -- <key>.since: when releasing <key> first failed (file times cannot
+        -- tell: a rename keeps the mtime, which is the acquire time)
+        if key:sub(1, #prefix) == prefix and not key:match("%.since$") and not key:match("%.tmp$") then
             local path = rdir .. "/" .. key
             -- nil: an immediate release claimed it meanwhile
             local ok, err = release_queued(ctx.config, ctx.name, key)
             if ok == false then
-                if (file_age(path) or 0) > give_up then
+                local since = tonumber(read_file(path .. ".since") or "")
+                if not since then
+                    since = os.time()
+                    write_file(path .. ".since", tostring(since))
+                end
+                if os.time() - since > give_up then
                     log_err("release %s failed for %ds, giving up: %s", key, give_up, err)
                     os.remove(path)
+                    os.remove(path .. ".since")
                     os.remove(state_path(ctx.config, "creds", key))
                 else
                     -- kept, retried on the next cycle
@@ -821,9 +818,9 @@ function hres_maintenance(ctx, layers)
     end
 
     -- A claim older than an hour was interrupted (slurmctld stopped while
-    -- releasing): queue the token again.
+    -- releasing): queue the token again. The rename into tmp/ set the ctime.
     local tdir = opt(ctx.config, "state_dir") .. "/tmp"
-    local p = io.popen(string.format("find %s -maxdepth 1 -name '*.releasing' -mmin +60 2>/dev/null", shq(tdir)))
+    local p = io.popen(string.format("find %s -maxdepth 1 -name '*.releasing' -cmin +60 2>/dev/null", shq(tdir)))
     if p then
         for path in p:lines() do
             local key = path:match("([^/]+)%.releasing$")

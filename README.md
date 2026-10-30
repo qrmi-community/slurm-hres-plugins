@@ -328,7 +328,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `user_required` | The `user_keys` ending in `APIKEY` or `AUTH_TOKEN` | Keys that must be in the user's file |
 | `cred_retry` | `300` | Seconds a credential failure is remembered: within it, the next pre-run of the user's jobs holds them (`hold`) or keeps them pending (`pend`) |
 | `cred_fail` | `hold` | After a credential failure: `hold` holds the job with the cause as its reason (shown by `squeue`); `pend` keeps the user's jobs pending (reason `Resources`) for `cred_retry` seconds |
-| `release_give_up` | `86400` | Seconds after which a release that keeps failing is dropped (and logged) |
+| `release_give_up` | `86400` | Seconds after the first failed release after which a release that keeps failing is dropped (and logged) |
 
 ---
 
@@ -387,7 +387,7 @@ The trade-off: the information used for admission can be up to `maintenance_cycl
 |---|---|
 | `tokens/<resource>.<jobid>.<sluid>` | Token of an acquired run |
 | `revoked/<resource>.<jobid>.<sluid>` | The run was revoked or ended (the async pre-run checks it and gives up) |
-| `release/<resource>.<jobid>.<sluid>` | Token waiting for release. Moved here from `tokens/` with a rename, so a token is queued once even when the async pre-run and a revoke or epilog race. Whoever releases it first moves it to `tmp/<key>.releasing`, so maintenance and an immediate release never both release it; a failed release moves it back |
+| `release/<resource>.<jobid>.<sluid>` | Token waiting for release. Moved here from `tokens/` with a rename, so a token is queued once even when the async pre-run and a revoke or epilog race. Whoever releases it first moves it to `tmp/<key>.releasing`, so maintenance and an immediate release never both release it; a failed release moves it back. `<key>.since` records when maintenance first failed to release it, for `release_give_up` |
 | `status/<resource>` | Status cache (`time=`, `status=`, `healthy=`, `busy=`, `available=`, `max=`, `reason=`) |
 | `creds/<resource>.<jobid>.<sluid>` | The user's keys used for acquire; used for the release, then removed |
 | `credfail/<resource>.<uid>` | Credential failure marker with the cause (no secrets); read by the next pre-run (`cred_fail`) |
