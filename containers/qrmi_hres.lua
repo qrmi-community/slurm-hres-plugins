@@ -205,17 +205,23 @@ local function read_file(path)
     return s
 end
 
--- Create the file 0600 first, so it is never readable by others.
+-- Write <path>.tmp, created 0600 so it is never readable by others, then
+-- rename it to path: a reader or a rename never sees a partial file.
 local function write_file(path, content, mode)
-    sh("umask 077 && : > " .. shq(path))
-    local f, err = io.open(path, "w")
+    local tmp = path .. ".tmp"
+    sh("umask 077 && : > " .. shq(tmp))
+    local f, err = io.open(tmp, "w")
     if not f then
         return false, err
     end
-    f:write(content)
-    f:close()
-    sh("chmod " .. (mode or "0600") .. " " .. shq(path))
-    return true
+    local ok, werr = f:write(content)
+    local closed, cerr = f:close()
+    if not (ok and closed) then
+        os.remove(tmp)
+        return false, werr or cerr
+    end
+    sh("chmod " .. (mode or "0600") .. " " .. shq(tmp))
+    return os.rename(tmp, path)
 end
 
 -- An empty file, without a shell: revoke and epilog run under the job lock.
@@ -612,9 +618,7 @@ local function write_status(config, hres_name, st, why)
         "max=" .. (cap and tostring(cap.max_slots) or ""),
         "reason=" .. (tostring(why or ""):gsub("\n", " ")),
     }
-    local path = state_path(config, "status", hres_name)
-    write_file(path .. ".tmp", table.concat(lines, "\n") .. "\n")
-    os.rename(path .. ".tmp", path)
+    write_file(state_path(config, "status", hres_name), table.concat(lines, "\n") .. "\n")
 end
 
 local function read_status(config, hres_name)
@@ -673,23 +677,54 @@ local function queue_release(config, key)
     return os.rename(state_path(config, "tokens", key), state_path(config, "release", key))
 end
 
-local function release_now(config, hres_name, key)
-    local path = state_path(config, "release", key)
-    local ok, err = release_run(config, hres_name, key, read_file(path))
+-- Release the queued token release/<key>. The file is claimed first (moved
+-- to tmp/), so maintenance and an immediate release never both release it.
+-- Returns nil if another thread claimed it; on failure the token goes back
+-- to release/ for maintenance to retry. The claim touches the file, so its
+-- age is the claim's (see maintenance).
+local function release_queued(config, hres_name, key)
+    local queued = state_path(config, "release", key)
+    local claimed = state_path(config, "tmp", key .. ".releasing")
+    if not os.rename(queued, claimed) then
+        return nil
+    end
+    sh("touch " .. shq(claimed))
+    local ok, err = release_run(config, hres_name, key, read_file(claimed))
     if ok then
-        os.remove(path)
+        os.remove(claimed)
         log("released %s", key)
-    else
+        return true
+    end
+    os.rename(claimed, queued)
+    return false, err
+end
+
+local function release_now(config, hres_name, key)
+    local ok, err = release_queued(config, hres_name, key)
+    if ok == false then
         log_err("release %s failed, maintenance retries it: %s", key, err)
     end
 end
 
 -- Under the job lock (revoke, epilog). The marker makes an async pre-run
 -- still acquiring for this run queue its token itself.
-local function end_run(config, hres_name, key)
-    touch(state_path(config, "revoked", key))
+local function end_run(config, hres_name, key, payload)
+    local marker = state_path(config, "revoked", key)
+    local marked = exists(marker)
+    touch(marker)
     if not queue_release(config, key) then
-        return
+        -- No tokens/<key>. A payload exists only once the async pre-run has
+        -- finished, so a payload with no earlier marker and nothing queued
+        -- means state_dir was lost (e.g. a recreated controller container):
+        -- queue the payload. Rare, so the shell in write_file is acceptable.
+        if marked or not payload or payload == "" or exists(state_path(config, "release", key)) then
+            return
+        end
+        log_err("%s: no token file, queueing the token from the payload", key)
+        if not (write_file(state_path(config, "tokens", key), payload) and queue_release(config, key)) then
+            log_err("%s: cannot queue the token from the payload", key)
+            return
+        end
     end
     if opt(config, "release") == "immediate" then
         release_now(config, hres_name, key)
@@ -770,19 +805,34 @@ function hres_maintenance(ctx, layers)
     for _, key in ipairs(list_dir(rdir)) do
         if key:sub(1, #prefix) == prefix then
             local path = rdir .. "/" .. key
-            local ok, err = release_run(ctx.config, ctx.name, key, read_file(path))
-            if ok then
-                os.remove(path)
-                log("released %s", key)
-            elseif (file_age(path) or 0) > give_up then
-                log_err("release %s failed for %ds, giving up: %s", key, give_up, err)
-                os.remove(path)
-                os.remove(state_path(ctx.config, "creds", key))
-            else
-                -- kept, retried on the next cycle
-                log_err("release %s failed: %s", key, err)
+            -- nil: an immediate release claimed it meanwhile
+            local ok, err = release_queued(ctx.config, ctx.name, key)
+            if ok == false then
+                if (file_age(path) or 0) > give_up then
+                    log_err("release %s failed for %ds, giving up: %s", key, give_up, err)
+                    os.remove(path)
+                    os.remove(state_path(ctx.config, "creds", key))
+                else
+                    -- kept, retried on the next cycle
+                    log_err("release %s failed: %s", key, err)
+                end
             end
         end
+    end
+
+    -- A claim older than an hour was interrupted (slurmctld stopped while
+    -- releasing): queue the token again.
+    local tdir = opt(ctx.config, "state_dir") .. "/tmp"
+    local p = io.popen(string.format("find %s -maxdepth 1 -name '*.releasing' -mmin +60 2>/dev/null", shq(tdir)))
+    if p then
+        for path in p:lines() do
+            local key = path:match("([^/]+)%.releasing$")
+            if key and key:sub(1, #prefix) == prefix then
+                os.rename(path, rdir .. "/" .. key)
+                log("queued the interrupted release of %s again", key)
+            end
+        end
+        p:close()
     end
 
     -- 2. forget revoke markers older than a day
@@ -955,13 +1005,23 @@ function hres_controller_job_async_prerun(ctx, job, prep)
         return slurm.ESLURM_HRES_REMOTE_FAIL
     end
     keep_token(res)
-    write_file(state_path(ctx.config, "tokens", key), token)
+    local saved, serr = write_file(state_path(ctx.config, "tokens", key), token)
+    if not saved then
+        -- Without tokens/<key> nothing could release the token later
+        log_err("JobId=%d %s: cannot save the token (%s), releasing it", job.job_id, ctx.name, tostring(serr))
+        local ok, rerr = release_run(ctx.config, ctx.name, key, token)
+        if not ok then
+            log_err("JobId=%d %s: release failed, the token stays acquired: %s", job.job_id, ctx.name, rerr)
+            os.remove(state_path(ctx.config, "creds", key))
+        end
+        return slurm.ESLURM_HRES_REMOTE_FAIL
+    end
 
     -- The run was revoked or ended while acquiring (e.g. scancel while
     -- CONFIGURING): release the token here, network calls are fine.
     if exists(state_path(ctx.config, "revoked", key)) then
         if queue_release(ctx.config, key) then
-            log("JobId=%d %s: revoked while acquiring, releasing", job.job_id, ctx.name)
+            log("JobId=%d %s: revoked or ended while acquiring, releasing", job.job_id, ctx.name)
             release_now(ctx.config, ctx.name, key)
         end
         return slurm.ESLURM_HRES_REMOTE_FAIL
@@ -973,14 +1033,14 @@ end
 
 -- Under the job lock. The run did not start.
 function hres_controller_job_revoke(ctx, job, prep)
-    end_run(ctx.config, ctx.name, run_key(ctx.name, job))
+    end_run(ctx.config, ctx.name, run_key(ctx.name, job), prep and prep.payload)
     return slurm.SUCCESS
 end
 
 -- Under the job lock, after the node epilogs. Also called when the job ends
 -- while the async pre-run is still acquiring, which is why it marks the run.
 function hres_controller_job_epilog(ctx, job, prep)
-    end_run(ctx.config, ctx.name, run_key(ctx.name, job))
+    end_run(ctx.config, ctx.name, run_key(ctx.name, job), prep and prep.payload)
     return slurm.SUCCESS
 end
 

@@ -387,18 +387,18 @@ The trade-off: the information used for admission can be up to `maintenance_cycl
 |---|---|
 | `tokens/<resource>.<jobid>.<sluid>` | Token of an acquired run |
 | `revoked/<resource>.<jobid>.<sluid>` | The run was revoked or ended (the async pre-run checks it and gives up) |
-| `release/<resource>.<jobid>.<sluid>` | Token waiting for release. Moved here from `tokens/` with a rename, so a token is queued once even when the async pre-run and a revoke or epilog race |
+| `release/<resource>.<jobid>.<sluid>` | Token waiting for release. Moved here from `tokens/` with a rename, so a token is queued once even when the async pre-run and a revoke or epilog race. Whoever releases it first moves it to `tmp/<key>.releasing`, so maintenance and an immediate release never both release it; a failed release moves it back |
 | `status/<resource>` | Status cache (`time=`, `status=`, `healthy=`, `busy=`, `available=`, `max=`, `reason=`) |
 | `creds/<resource>.<jobid>.<sluid>` | The user's keys used for acquire; used for the release, then removed |
 | `credfail/<resource>.<uid>` | Credential failure marker with the cause (no secrets); read by the next pre-run (`cred_fail`) |
-| `tmp/` | Short-lived copy of the user's file for QRMI to parse (removed right after) |
+| `tmp/` | Short-lived copy of the user's file for QRMI to parse (removed right after), and `<key>.releasing`: a token being released. Maintenance queues a `.releasing` file older than an hour again (slurmctld stopped while releasing) |
 
 A run is identified by the `job_id` and `sluid` pair. A requeue changes the sluid, so it is treated as a new run.
 
 **Operating notes**
 
 - **Normal state:** with no job running and nothing waiting for release, only `status/` has files (and `revoked/` markers younger than a day). Anything left in `tokens/`, `creds/` or `release/` belongs to a running job or a release that keeps failing; the log says why (`release ... failed`).
-- **Safe to delete:** `credfail/<res>.<uid>`, to let a user's jobs try again at once. `tmp/` holds copies of user files only for a moment; a file left there after a crash can be deleted.
+- **Safe to delete:** `credfail/<res>.<uid>`, to let a user's jobs try again at once. `tmp/` holds copies of user files only for a moment; such a file left there after a crash can be deleted, but not a `*.releasing` file (a token).
 - **Do not delete:** `tokens/`, `creds/` and `release/`. Without them the plugin cannot release the token, and it stays acquired on the backend. A release that keeps failing is dropped after `release_give_up` (default one day) and logged.
 - **Secrets:** `creds/<key>` holds the user's API key in clear text from acquire until the release succeeds, and `tmp/` holds it for a moment while it is parsed. The directory is owned by SlurmUser, mode 0700, and the files 0600. Anyone who can read state_dir as root or SlurmUser, and any backup or copy of it (on the container cluster, the `var_spool_slurmctld` volume), can read those keys. So users manage their keys themselves, but the site also holds each key for the length of a job.
 
