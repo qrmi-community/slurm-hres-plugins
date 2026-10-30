@@ -218,6 +218,14 @@ local function write_file(path, content, mode)
     return true
 end
 
+-- An empty file, without a shell: revoke and epilog run under the job lock.
+local function touch(path)
+    local f = io.open(path, "w")
+    if f then
+        f:close()
+    end
+end
+
 local function list_dir(dir)
     local out = {}
     local p = io.popen("ls -1 " .. shq(dir) .. " 2>/dev/null")
@@ -571,7 +579,7 @@ end
 ---------------------------------------------------------------------------
 -- controller state
 --   <state_dir>/tokens/<key>    token of an acquired run
---   <state_dir>/revoked/<key>   run revoked (async pre-run must give up)
+--   <state_dir>/revoked/<key>   run revoked or ended (async pre-run must give up)
 --   <state_dir>/release/<key>   token waiting for a deferred release
 --   <state_dir>/creds/<key>     user keys used for acquire, until released
 --   <state_dir>/credfail/<res>.<uid>  last credential failure (no secrets)
@@ -657,32 +665,37 @@ local function release_run(config, hres_name, key, token)
     return ok, err
 end
 
--- Release now or queue it for maintenance, then forget the token.
-local function dispose_token(config, hres_name, key, token)
-    os.remove(state_path(config, "tokens", key))
-    if not token or token == "" then
-        os.remove(state_path(config, "creds", key))
-        return
-    end
-    if opt(config, "release") == "immediate" then
-        local ok, err = release_run(config, hres_name, key, token)
-        if ok then
-            log("released %s", key)
-        else
-            log_err("release %s failed: %s", key, err)
-            write_file(state_path(config, "release", key), token)
-        end
+-- Queue the run's token for release: tokens/<key> moves to release/<key>.
+-- The rename is atomic, so when the async pre-run and revoke or epilog race,
+-- only one of them queues the token and it is released once. Maintenance
+-- performs the release, or the caller at once with release=immediate.
+local function queue_release(config, key)
+    return os.rename(state_path(config, "tokens", key), state_path(config, "release", key))
+end
+
+local function release_now(config, hres_name, key)
+    local path = state_path(config, "release", key)
+    local ok, err = release_run(config, hres_name, key, read_file(path))
+    if ok then
+        os.remove(path)
+        log("released %s", key)
     else
-        write_file(state_path(config, "release", key), token)
-        log("queued release of %s", key)
+        log_err("release %s failed, maintenance retries it: %s", key, err)
     end
 end
 
-local function job_token(config, prep, key)
-    if prep and prep.payload and prep.payload ~= "" then
-        return prep.payload
+-- Under the job lock (revoke, epilog). The marker makes an async pre-run
+-- still acquiring for this run queue its token itself.
+local function end_run(config, hres_name, key)
+    touch(state_path(config, "revoked", key))
+    if not queue_release(config, key) then
+        return
     end
-    return read_file(state_path(config, "tokens", key))
+    if opt(config, "release") == "immediate" then
+        release_now(config, hres_name, key)
+    else
+        log("queued release of %s", key)
+    end
 end
 
 -- Authentication failures reported by the backend for the key in use.
@@ -944,12 +957,12 @@ function hres_controller_job_async_prerun(ctx, job, prep)
     keep_token(res)
     write_file(state_path(ctx.config, "tokens", key), token)
 
-    -- A revoke may have run while acquiring: it is final for this run.
+    -- The run was revoked or ended while acquiring (e.g. scancel while
+    -- CONFIGURING): release the token here, network calls are fine.
     if exists(state_path(ctx.config, "revoked", key)) then
-        log("JobId=%d %s: revoked while acquiring, releasing", job.job_id, ctx.name)
-        os.remove(state_path(ctx.config, "tokens", key))
-        if not release_run(ctx.config, ctx.name, key, token) then
-            write_file(state_path(ctx.config, "release", key), token)
+        if queue_release(ctx.config, key) then
+            log("JobId=%d %s: revoked while acquiring, releasing", job.job_id, ctx.name)
+            release_now(ctx.config, ctx.name, key)
         end
         return slurm.ESLURM_HRES_REMOTE_FAIL
     end
@@ -958,19 +971,16 @@ function hres_controller_job_async_prerun(ctx, job, prep)
     return slurm.SUCCESS, token
 end
 
--- Under the job lock. The run did not start: mark it final and dispose
--- of a token if one was already acquired.
+-- Under the job lock. The run did not start.
 function hres_controller_job_revoke(ctx, job, prep)
-    local key = run_key(ctx.name, job)
-    write_file(state_path(ctx.config, "revoked", key), "")
-    dispose_token(ctx.config, ctx.name, key, job_token(ctx.config, prep, key))
+    end_run(ctx.config, ctx.name, run_key(ctx.name, job))
     return slurm.SUCCESS
 end
 
--- Under the job lock, after the node epilogs.
+-- Under the job lock, after the node epilogs. Also called when the job ends
+-- while the async pre-run is still acquiring, which is why it marks the run.
 function hres_controller_job_epilog(ctx, job, prep)
-    local key = run_key(ctx.name, job)
-    dispose_token(ctx.config, ctx.name, key, job_token(ctx.config, prep, key))
+    end_run(ctx.config, ctx.name, run_key(ctx.name, job))
     return slurm.SUCCESS
 end
 
