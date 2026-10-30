@@ -393,8 +393,9 @@ local function open_resource(config, hres_name, user_env, job)
     end
     env.QRMI_JOB_UID = tostring(job and job.user_id or 0)
     env.QRMI_JOB_ID = tostring(job and job.job_id or 0)
-    -- Where jobs find the user's Pasqal config file. The controller reads no
-    -- user file, and QRMI would warn on every status() that it has none.
+    -- pasqal-cloud: where jobs find the user's Pasqal config file. The
+    -- controller reads no user file, and QRMI would warn on every status()
+    -- that it has none. Other types do not use it.
     env.PASQAL_CONFIG_ROOT = nil
     local res, rerr = qrmi_mod.new_from_config(def.name, def.type, env)
     if not res then
