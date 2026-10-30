@@ -9,8 +9,10 @@ then
     echo "---> Starting the Slurm Database Daemon (slurmdbd) ..."
 
     {
+        # shellcheck source=/dev/null
         . /etc/slurm/slurmdbd.conf
-        until echo "SELECT 1" | mysql -h $StorageHost -u$StorageUser -p$StoragePass 2>&1 > /dev/null
+        # shellcheck disable=SC2154 # set by slurmdbd.conf
+        until echo "SELECT 1" | mysql -h "$StorageHost" -u"$StorageUser" -p"$StoragePass" > /dev/null 2>&1
         do
             echo "-- Waiting for database to become active ..."
             sleep 2
@@ -28,7 +30,7 @@ then
 
     echo "---> Waiting for slurmdbd to become active before starting slurmctld ..."
 
-    until 2>/dev/null >/dev/tcp/slurmdbd/6819
+    until true 2>/dev/null >/dev/tcp/slurmdbd/6819
     do
         echo "-- slurmdbd is not available.  Sleeping ..."
         sleep 2
@@ -50,7 +52,7 @@ then
 
     echo "---> Waiting for slurmctld to become active before starting slurmd..."
 
-    until 2>/dev/null >/dev/tcp/slurmctld/6817
+    until true 2>/dev/null >/dev/tcp/slurmctld/6817
     do
         echo "-- slurmctld is not available.  Sleeping ..."
         sleep 2
