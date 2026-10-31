@@ -1,0 +1,37 @@
+name: Lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: StyLua (check only)
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check containers/ containers/job_submit_qrmi.lua.example
+
+      - name: luacheck
+        uses: lunarmodules/luacheck@v1
+        with:
+          args: containers/ containers/job_submit_qrmi.lua.example
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: |
+          shellcheck --version
+          shellcheck containers/*.sh
