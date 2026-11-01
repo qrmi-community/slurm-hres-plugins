@@ -155,7 +155,8 @@ cat > /qrmi-creds/$(id -un)/config.json <<'EOF'
       "name": "ibm_kingston",
       "type": "ibm-quantum-compute-service",
       "environment": {
-        "QRMI_IBM_QCS_IAM_APIKEY": "<your API key>"
+        "QRMI_IBM_QCS_IAM_APIKEY": "<your API key>",
+        "QRMI_IBM_QCS_SERVICE_CRN": "<your instance>"
       }
     }
   ]
