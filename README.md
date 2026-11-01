@@ -105,6 +105,13 @@ chmod 640 /etc/slurm/qrmi_config.json
         value: /qrmi-creds/%u/config.json
 ```
 
+slurmctld reads `resources.yaml` as SlurmUser, so SlurmUser must be able to read it. It holds no secrets, so 644 is fine too. Otherwise slurmctld exits with `fatal: Something wrong with reading resources.yaml: Unable to load file for reading` (`Permission denied` at debug level).
+
+```bash
+chown root:slurm /etc/slurm/resources.yaml
+chmod 640 /etc/slurm/resources.yaml
+```
+
 **5. Set the TaskProlog and an Epilog in `slurm.conf`.**
 
 ```
