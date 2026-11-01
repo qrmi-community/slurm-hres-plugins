@@ -108,6 +108,26 @@ services:
     networks:
       - slurm-network
 
+  # Slurm REST API (slurmrestd) with JWT authentication, for Slurm-web and curl.
+  #   curl -H "X-SLURM-USER-TOKEN: $SLURM_JWT" http://slurmrestd:6820/slurm/v0.0.45/diag
+  slurmrestd:
+    <<: *ping
+    image: slurm-docker-cluster:${IMAGE_TAG}
+    command: ["slurmrestd"]
+    hostname: slurmrestd
+    container_name: slurmrestd
+    volumes:
+      - etc_munge:/etc/munge
+      - etc_slurm:/etc/slurm
+    expose:
+      - "6820"
+    ports:
+      - 127.0.0.1:6820:6820   # REST API from the host
+    depends_on:
+      - "slurmctld"
+    networks:
+      - slurm-network
+
   slurm-login:
     image: slurm-docker-cluster:${IMAGE_TAG}
     command: ["login"]
