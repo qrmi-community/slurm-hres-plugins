@@ -1,6 +1,6 @@
 # Slurm HRES Plugin for QRMI
 
-Last updated: 2026-10-29
+Last updated: 2026-11-02
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
 
 [![License](https://img.shields.io/github/license/qiskit-community/qrmi.svg?)](https://opensource.org/licenses/Apache-2.0) <!--- long-description-skip-begin -->
@@ -105,6 +105,13 @@ chmod 640 /etc/slurm/qrmi_config.json
         value: /qrmi-creds/%u/config.json
 ```
 
+slurmctld reads `resources.yaml` as SlurmUser, so SlurmUser must be able to read it. It holds no secrets, so 644 is fine too. Otherwise slurmctld exits with `fatal: Something wrong with reading resources.yaml: Unable to load file for reading` (`Permission denied` at debug level).
+
+```bash
+chown root:slurm /etc/slurm/resources.yaml
+chmod 640 /etc/slurm/resources.yaml
+```
+
 **5. Set the TaskProlog and an Epilog in `slurm.conf`.**
 
 ```
@@ -207,11 +214,11 @@ Credential problems appear as the job's reason in `squeue` (with `cred_fail=hold
 | `... is writable by group or others` | `chmod 640` |
 | `... is a symbolic link` | Replace it with a regular file |
 | `type of <res> is X, but the site defines it as Y` | Change `type` to the site's value |
-| `... lacks QRMI_..._IAM_APIKEY for <res>` | Check the key names and `name` |
+| `... lacks QRMI_..._IAM_APIKEY for <res>` | Check `name` and the key names, which depend on the type (`QRMI_IBM_QS_...` for `ibm-quantum-system`, `QRMI_IBM_QCS_...` for `ibm-quantum-compute-service`, `QRMI_IBM_QRS_...` for `qiskit-runtime-service`) |
 | Authentication error at acquire (401, 403, ...) | Wrong API key or CRN |
 | `rejected by the backend: ...` | The backend refused the job's user without a user key (401 or 403), e.g. Warden (Pasqal Local): the user is not in `api.authorized_users`, or SlurmUser is not in `api.admin_users`. The admin fixes the cause. The reason shows the first 200 characters of the answer; slurmctld.log has all of it. A MUNGE error (e.g. Warden has another MUNGE key) is not held: the user's jobs stay pending (`Resources`) for `cred_retry` seconds, then try again |
 
-After fixing the file, resubmit the held job. With `cred_fail=pend`, the job is retried automatically once `cred_retry` (default 300 s) has passed; to retry at once, the admin runs `rm /var/spool/slurmctld/hres_qrmi/credfail/<res>.<uid>` on slurmctld.
+After fixing the file, resubmit the held job. The hold is an admin hold, so only an admin can release it instead (`scontrol release <jobid>`). This is also the way after fixing the site's side (`resources.yaml` or `qrmi_config.json`): `scontrol reconfigure` loads the new settings but does not release held jobs. Once released, the job reads the user's file again at its next start; if the problem remains, it is held again with the new cause. With `cred_fail=pend`, the job is retried automatically once `cred_retry` (default 300 s) has passed; to retry at once, the admin runs `rm /var/spool/slurmctld/hres_qrmi/credfail/<res>.<uid>` on slurmctld.
 
 ---
 
