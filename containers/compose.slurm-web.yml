@@ -1,0 +1,84 @@
+# Slurm-web (https://github.com/rackslab/Slurm-web): web dashboard for the cluster.
+#   docker compose -f compose.yml -f compose.slurm-web.yml up -d
+# Then open http://localhost:5011
+#
+# The agent queries slurmrestd (defined in compose.yml) with JWTs it signs itself
+# with a copy of the Slurm JWT key; the gateway serves the UI and talks to the agent.
+# Configuration: ./slurm-web/{agent,gateway,policy}.ini
+#
+# The images are published for linux/amd64 only. On Apple silicon they run under
+# emulation; to build native images instead, replace "image:" in both services with
+#   build:
+#     context: https://github.com/rackslab/Slurm-web.git#v7.0.0
+#     dockerfile: containers/Dockerfile
+#     target: agent        # or gateway
+# and remove "platform:".
+
+services:
+  # One-shot: prepares the secrets in the slurm_web_keys volume, then exits.
+  #  - slurmrestd.key: copy of the Slurm JWT key (agent signs tokens for slurmrestd)
+  #  - jwt.key, session.key: Slurm-web's own keys (agent <-> gateway, UI sessions)
+  slurm-web-init:
+    image: ghcr.io/rackslab/slurm-web-gateway:7.0.0
+    platform: linux/amd64
+    container_name: slurm-web-init
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        until [ -s /etc/slurm/jwt_hs256.key ]; do echo "waiting for /etc/slurm/jwt_hs256.key"; sleep 2; done
+        install -m 0400 -o slurm-web -g slurm-web /etc/slurm/jwt_hs256.key /var/lib/slurm-web/slurmrestd.key
+        /opt/slurm-web-venv/bin/slurm-web gen-jwt-key --set-ownership
+        /opt/slurm-web-venv/bin/slurm-web gen-session-key --set-ownership
+        ls -l /var/lib/slurm-web
+    volumes:
+      - etc_slurm:/etc/slurm:ro
+      - slurm_web_keys:/var/lib/slurm-web
+      - ./slurm-web/gateway.ini:/etc/slurm-web/gateway.ini:ro
+    depends_on:
+      - slurmdbd
+    networks:
+      - slurm-network
+
+  slurm-web-agent:
+    image: ghcr.io/rackslab/slurm-web-agent:7.0.0
+    platform: linux/amd64
+    container_name: slurm-web-agent
+    hostname: slurm-web-agent
+    restart: unless-stopped
+    volumes:
+      - ./slurm-web/agent.ini:/etc/slurm-web/agent.ini:ro
+      - ./slurm-web/policy.ini:/etc/slurm-web/policy.ini:ro
+      - slurm_web_keys:/var/lib/slurm-web
+    expose:
+      - "5012"
+    depends_on:
+      slurm-web-init:
+        condition: service_completed_successfully
+      slurmrestd:
+        condition: service_started
+    networks:
+      - slurm-network
+
+  slurm-web-gateway:
+    image: ghcr.io/rackslab/slurm-web-gateway:7.0.0
+    platform: linux/amd64
+    container_name: slurm-web-gateway
+    hostname: slurm-web-gateway
+    restart: unless-stopped
+    volumes:
+      - ./slurm-web/gateway.ini:/etc/slurm-web/gateway.ini:ro
+      - slurm_web_keys:/var/lib/slurm-web
+    ports:
+      - 127.0.0.1:5011:5011   # Web UI: http://localhost:5011
+    depends_on:
+      slurm-web-init:
+        condition: service_completed_successfully
+      slurm-web-agent:
+        condition: service_started
+    networks:
+      - slurm-network
+
+volumes:
+  slurm_web_keys:

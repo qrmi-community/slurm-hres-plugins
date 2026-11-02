@@ -11,6 +11,7 @@ RUN set -ex \
     && yum -y update \
     && yum -y install dnf-plugins-core \
     && yum config-manager --set-enabled crb \
+    && yum -y install epel-release \
     && yum -y install \
        wget \
        bzip2 \
@@ -32,6 +33,7 @@ RUN set -ex \
        vim-enhanced \
        http-parser-devel \
        json-c-devel \
+       libjwt-devel \
        cmake \
        clang-tools-extra \
        procps \
@@ -89,6 +91,7 @@ RUN set -x \
     && ./configure --enable-debug --prefix=/usr --sysconfdir=/etc/slurm \
         --with-mysql_config=/usr/bin  --libdir=/usr/lib64 \
         --with-pmix=/usr/local/pmix-${OPENPMIx_VERSION} \
+        --enable-slurmrestd --with-jwt \
     && make install \
     && install -D -m644 etc/cgroup.conf.example /etc/slurm/cgroup.conf.example \
     && install -D -m644 etc/slurm.conf.example /etc/slurm/slurm.conf.example \
@@ -97,6 +100,8 @@ RUN set -x \
     && popd \
     && groupadd -r --gid=990 slurm \
     && useradd -r -g slurm --uid=990 slurm \
+    && groupadd -r --gid=991 slurmrestd \
+    && useradd -r -g slurmrestd --uid=991 -s /sbin/nologin slurmrestd \
     && mkdir /etc/sysconfig/slurm \
         /var/spool/slurmd \
         /var/run/slurmd \
