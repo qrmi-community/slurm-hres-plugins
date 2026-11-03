@@ -22,7 +22,7 @@ One HRES resource = one QRMI resource (backend). A job that requests
 the resource gets the backend acquired for it, sees the same environment
 variables as with spank_qrmi, and the backend is released at job end.
 
-  sbatch --licenses=ibm_kingston:1 job.sh
+  sbatch --resources=ibm_kingston:1 job.sh
 
 Flow
   controller (slurmctld, as SlurmUser)
