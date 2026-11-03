@@ -17,36 +17,6 @@ This release contains the hres/lua plugin (qrmi_hres.lua), a TaskProlog, an admi
 
 Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later, Lua 5.4.
 
-## Contents
-
-**Set up and use**
-
-- [0. Setup](#0-setup)\
-  [0.1 Prepare the cluster](#01-prepare-the-cluster-admin-once) · [0.2 Add a user](#02-add-a-user-admin-once-per-user) · [0.3 Register your API key](#03-register-your-api-key-the-user) · [0.4 Submit and check jobs](#04-submit-and-check-jobs-the-user)
-
-**Design**
-
-- [1. Background](#1-background)\
-  [1.1 Slurm HRES plugins](#11-slurm-hres-plugins) · [1.2 QRMI](#12-qrmi) · [1.3 spank_qrmi](#13-spank_qrmi-the-previous-approach)
-- [2. Architecture](#2-architecture)
-- [3. Deliverables](#3-deliverables)
-- [4. resources.yaml](#4-resourcesyaml)\
-  [4.1 Plugin config entries](#41-plugin-config-entries-qrmi_hreslua)
-- [5. qrmi_hres.lua in detail](#5-qrmi_hreslua-in-detail)\
-  [5.1 What each callback does](#51-what-each-callback-does) · [5.2 Admission check](#52-admission-check-may-the-job-run) · [5.3 Keeping network calls out of the job lock](#53-keeping-network-calls-out-of-the-job-lock) · [5.4 State files](#54-state-files-state_dir) · [5.5 How often acquire is called](#55-how-often-acquire-is-called) · [5.6 Keeping the token after the async pre-run](#56-keeping-the-token-after-the-async-pre-run) · [5.7 Job environment](#57-job-environment-same-names-as-spank_qrmi)
-- [6. Container environment](#6-container-environment-dockerfile-additions)
-
-**Status**
-
-- [7. Verification results](#7-verification-results)\
-  [7.1 Callback trace with hres_trace.lua](#71-callback-trace-with-hres_tracelua-2026-10-22) · [7.2 qrmi_hres.lua against the real backend](#72-qrmi_hreslua-against-the-real-backend-2026-10-24)
-- [8. Open issues](#8-open-issues)\
-  [8.1 node_job_epilog is skipped without an Epilog script](#81-node_job_epilog-is-skipped-without-an-epilog-script-resolved-with-a-workaround) · [8.2 Credentials](#82-credentials) · [8.3 Other](#83-other)
-
-**Reference**
-
-- [9. References](#9-references)
-
 ---
 
 ## 0. Setup
