@@ -1,6 +1,6 @@
 # Slurm HRES Plugin for QRMI
 
-Last updated: 2026-11-02
+Last updated: 2026-11-03
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
 
 [![License](https://img.shields.io/github/license/qiskit-community/qrmi.svg?)](https://opensource.org/licenses/Apache-2.0) <!--- long-description-skip-begin -->
@@ -11,7 +11,7 @@ Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QR
 
 Slurm HRES Plugin for QRMI lets the Slurm workload manager schedule quantum processors (QPUs) alongside CPUs and GPUs. It is a plugin for the Hierarchical Resources (HRES) interface of Slurm (hres/lua, introduced in Slurm 26.11 and currently in beta), built on QRMI, the Quantum Resource Management Interface.
 
-Each QPU backend is configured as an HRES resource that jobs request with --licenses. Slurm checks the backend's availability before it allocates nodes, so jobs wait in the queue instead of holding classical resources idle. The plugin acquires the QPU for the job, passes the session to the job through the same environment variables as the earlier SPANK-based plugin (spank_qrmi), and releases it after the job ends. Calls to the quantum service are kept out of the scheduler's critical path, and each user keeps their own API key in a file they manage.
+Each QPU backend is configured as an HRES resource that jobs request with --resources (or --licenses). Slurm checks the backend's availability before it allocates nodes, so jobs wait in the queue instead of holding classical resources idle. The plugin acquires the QPU for the job, passes the session to the job through the same environment variables as the earlier SPANK-based plugin (spank_qrmi), and releases it after the job ends. Calls to the quantum service are kept out of the scheduler's critical path, and each user keeps their own API key in a file they manage.
 
 This release contains the hres/lua plugin (qrmi_hres.lua), a TaskProlog, an administration tool for per-user credential directories, an optional job_submit/lua check, a container-based Slurm cluster for testing, and design and verification notes. It is intended as a reference implementation for integrating quantum resources with Slurm through HRES.
 
@@ -193,7 +193,7 @@ jq '.resources[] | {name, type, keys: (.environment|keys)}' /qrmi-creds/$(id -un
 ### 0.4 Submit and check jobs (the user)
 
 ```bash
-sbatch --licenses=ibm_kingston:1 job.sh
+sbatch --resources=ibm_kingston:1 job.sh
 squeue --me
 ```
 
@@ -243,7 +243,7 @@ Slurm master gained a plugin interface for Hierarchical Resources (HRES, beta si
 
 Key points:
 
-- `config` (resources.yaml), `plugin_args` (`--licenses=x:1[k=v]`) and `payload` (the pre-run return value) travel to the nodes in the job credential, so **the job's user can read them**. Never put secrets in them.
+- `config` (resources.yaml), `plugin_args` (`--resources=x:1[k=v]`) and `payload` (the pre-run return value) travel to the nodes in the job credential, so **the job's user can read them**. Never put secrets in them.
 - If the pre-run returns `ESLURM_HRES_REMOTE_FAIL`, the job stays pending. Any other error puts the job on hold.
 - Callbacks that run under the job lock stall all of slurmctld. **No network calls there.**
 - **HRES callbacks cannot set the job's environment** (tasks are started with `execve(..., step->env)`).
@@ -262,7 +262,7 @@ Quantum Resource Management Interface. Written in Rust, with C, Python and Lua A
 
 [spank_qrmi](https://github.com/qiskit-community/spank-plugins/tree/main/plugins/spank_qrmi) is the Slurm SPANK plugin for QRMI in [qiskit-community/spank-plugins](https://github.com/qiskit-community/spank-plugins), described in the [IBM Quantum Slurm plugin guide](https://quantum.cloud.ibm.com/docs/guides/slurm-plugin). It acquires the QPU when the job starts running, after its nodes are allocated, and exports the QRMI settings and the acquisition token to the job as environment variables.
 
-This document refers to it as the baseline. `qrmi_hres.lua` exports the same environment variable names (5.7), so programs that read them keep working, but it checks QPU availability before nodes are allocated, and QPUs are requested with `--licenses`.
+This document refers to it as the baseline. `qrmi_hres.lua` exports the same environment variable names (5.7), so programs that read them keep working, but it checks QPU availability before nodes are allocated, and QPUs are requested with `--resources`.
 
 ---
 
@@ -274,10 +274,12 @@ This document refers to it as the baseline. `qrmi_hres.lua` exports the same env
 **One HRES resource = one QRMI resource (backend).** Every backend is reachable from both c1 and c2, so a resource has a single layer covering `c[1-2]` rather than splitting nodes. Users pick a backend by resource name.
 
 ```
-sbatch --licenses=ibm_kingston:1 job.sh
-sbatch --licenses='ibm_kingston:1,ibm_other:1' job.sh   # AND (all required)
+sbatch --resources=ibm_kingston:1 job.sh
+sbatch --resources='ibm_kingston:1,ibm_other:1' job.sh   # AND (all required)
 sbatch --licenses='ibm_kingston:1|ibm_other:1' job.sh   # OR ([...] and (...) not allowed)
 ```
+
+`--resources` is the HRES option of sbatch, srun and salloc. It only appends its value to the job's licenses, so `--licenses` (`-L`) requests the same thing; use `--licenses` on a Slurm without `--resources` (it was added to master in 2025-09), and for OR (`|`), which is a `--licenses` feature.
 
 ---
 
@@ -436,7 +438,7 @@ QRMI_JOB_QPU_TYPES     / SLURM_JOB_QPU_TYPES
 QRMI_JOB_ID, QRMI_JOB_UID
 ```
 
-`<qpu>_QRMI_JOB_QPU_SLOTS` is the count the job requested for that resource (`--licenses=ibm_kingston:2` → `ibm_kingston_QRMI_JOB_QPU_SLOTS=2`; 1 when no count is given), so each QRMI resource can read its own. QRMI cannot read Slurm's own `SLURM_JOB_LICENSES`, as it does not depend on a resource manager. spank_qrmi does not set it yet.
+`<qpu>_QRMI_JOB_QPU_SLOTS` is the count the job requested for that resource (`--resources=ibm_kingston:2` → `ibm_kingston_QRMI_JOB_QPU_SLOTS=2`; 1 when no count is given), so each QRMI resource can read its own. QRMI cannot read Slurm's own `SLURM_JOB_LICENSES`, as it does not depend on a resource manager. spank_qrmi does not set it yet.
 
 slurm.conf needs:
 
