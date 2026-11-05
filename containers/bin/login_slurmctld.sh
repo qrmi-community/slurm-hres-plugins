@@ -1,1 +1,2 @@
-podman exec -it slurmctld bash
+#!/usr/bin/env bash
+exec "$(dirname "$0")/_exec.sh" slurmctld

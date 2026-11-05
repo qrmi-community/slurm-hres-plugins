@@ -34,4 +34,4 @@ jobs:
       - name: ShellCheck
         run: |
           shellcheck --version
-          shellcheck containers/*.sh
+          shellcheck containers/*.sh containers/bin/*.sh
