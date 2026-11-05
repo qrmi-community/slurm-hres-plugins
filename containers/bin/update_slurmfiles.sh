@@ -20,7 +20,8 @@ for var in "$@"
 do
     if [ "$var" = "slurmdbd.conf" ] || [ "$var" = "slurm.conf" ] || [ "$var" = "cgroup.conf" ] || [ "$var" = "gres.conf" ]
     then
-        export SLURM_TMP=$(cat $var)
+        SLURM_TMP=$(cat "$var")
+        export SLURM_TMP
         "$engine" exec slurmctld bash -c "echo \"$SLURM_TMP\" >/etc/slurm/\"$var\""
         restart=true
     fi
