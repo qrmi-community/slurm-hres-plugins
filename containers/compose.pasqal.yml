@@ -1,0 +1,62 @@
+# Local Pasqal QPU: Warden (pasqal-io/warden) in front of its mock QPU API, on the Slurm
+# cluster network. Not a real QPU.
+#   docker compose -f compose.yml -f compose.pasqal.yml up -d
+# Inside slurm-network, "warden" resolves via Compose's built-in DNS; QRMI reaches it at
+# http://warden:4207 (see qrmi_config.json.example, resource type pasqal-local).
+# Warden authenticates requests with MUNGE, so it shares the cluster's munge key (etc_munge).
+# munged requires the key to be owned by its user: the munge user is created with the uid
+# it has in the Slurm image (998), which owns the key.
+
+# Allow ping inside the containers. Podman drops NET_RAW by default and limits
+# ping_group_range to GID 0; this works the same on Docker/Rancher Desktop.
+x-ping: &ping
+  cap_add:
+    - NET_RAW
+  sysctls:
+    net.ipv4.ping_group_range: "0 2147483647"
+
+services:
+  warden:
+    <<: *ping
+    image: localhost/warden:${WARDEN_VERSION:-0.3.2}
+    build:
+      args:
+        WARDEN_VERSION: ${WARDEN_VERSION:-0.3.2}
+      dockerfile_inline: |
+        FROM python:3.12-slim
+        ARG WARDEN_VERSION
+        RUN groupadd -r -g 998 munge && useradd -r -u 998 -g munge -d /var/lib/munge munge \
+            && apt-get update \
+            && apt-get install -y --no-install-recommends munge make \
+            && rm -rf /var/lib/apt/lists/* \
+            && install -d -o munge -g munge -m 0755 /run/munge
+        ADD https://github.com/pasqal-io/warden.git#v$${WARDEN_VERSION} /opt/warden
+        RUN make -C /opt/warden install PYTHON=python3
+        WORKDIR /opt/warden
+        # Mock QPU API on localhost:8000 (Warden's default qpu.uri), then API + scheduler.
+        ENTRYPOINT ["/bin/bash", "-c", "\
+          runuser -u munge -- /usr/sbin/munged \
+          && { .venv/bin/python -m uvicorn mock_qpu_api.app:app --app-dir tests --port 8000 & } \
+          && exec make run"]
+    hostname: warden
+    container_name: warden-hres
+    environment:
+      WARDEN_API_PORT: "4207"
+      WARDEN_QPU_URI: http://localhost:8000
+      WARDEN_DATABASE_NAME: /opt/warden/db/warden.db
+      # root and SlurmUser (slurm, uid 990), which runs qrmi_hres.lua in slurmctld
+      WARDEN_API_ADMINUSERS: '["0", "990"]'
+      MOCK_QPU_API_SHOT_DURATION_S: "0.01"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - etc_munge:/etc/munge
+      - warden_db:/opt/warden/db
+    expose:
+      - "4207"
+    depends_on:
+      - "slurmctld"
+    networks:
+      - slurm-network
+
+volumes:
+  warden_db:
