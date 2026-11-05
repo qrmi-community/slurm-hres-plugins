@@ -1,4 +1,4 @@
-# Slurm HRES Plugin for QRMI
+# The QRMI plugin for Slurm HRES
 
 Last updated: 2026-11-03
 Targets: Slurm master (26.11.0 planned, after the `51036-HRES-plugin` merge), QRMI 0.26.4 or later (main)
