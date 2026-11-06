@@ -1,4 +1,16 @@
 
+## Attach warden to cluster
+
+```bash
+docker compose -f containers/compose.yml -f containers/compose.pasqal.yml up -d 
+```
+
+Check that Warden is reachable from any node of the cluster: 
+
+```bash
+curl warden:4207
+```
+
 ## Resource.yml working example
 
 
@@ -69,4 +81,11 @@ Disable Warden:
 ```bash
 # As root user
  curl -X POST warden:4207/accessible -H "X-Munge-Cred: $(munge -n)" -H "Content-Type: application/json" -d '{"is_accessible": false, "message": "Disabling Warden"}'
+```
+
+Re-enable Warden:
+
+```bash
+# As root user
+ curl -X POST warden:4207/accessible -H "X-Munge-Cred: $(munge -n)" -H "Content-Type: application/json" -d '{"is_accessible": true, "message": "Enabling Warden"}'
 ```
