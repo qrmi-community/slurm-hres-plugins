@@ -34,6 +34,16 @@ The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login)
 
 **1. Build the image.** The Dockerfile builds QRMI and installs these files (details in section 6).
 
+```bash
+cd containers
+
+# docker
+docker compose build --no-cache
+
+# podman
+podman compose build --no-cache
+```
+
 | File | Location |
 |---|---|
 | `qrmi_hres.lua`, `hres_trace.lua`, `resources.yaml.example` | `/etc/slurm/` |
@@ -116,7 +126,7 @@ QRMI_USER_BASE=/qrmi-creds qrmi_user_dir.sh alice bob
 | `/qrmi-creds/<user>/config.json` | `<user>:slurm` | 640 | The user can write it. SlurmUser can read it |
 
 - Never add users to the slurm group: they could read everyone's keys. The script warns if the group has members.
-- `QRMI_USER_BASE` must match `user_config` in `resources.yaml`.
+- `QRMI_USER_BASE` must match `user_config` in `resources.yaml`(4.1).
 - Optional: to report a bad file at submit time, install `job_submit_qrmi.lua` as `/etc/slurm/job_submit.lua` and add `JobSubmitPlugins=lua` to `slurm.conf`. Set `QRMI_RESOURCES` and `USER_CONFIG` in it to match `resources.yaml`.
 
 ### 0.3 Register your API key (the user)
@@ -184,7 +194,7 @@ Credential problems appear as the job's reason in `squeue` (with `cred_fail=hold
 | `... is writable by group or others` | `chmod 640` |
 | `... is a symbolic link` | Replace it with a regular file |
 | `type of <res> is X, but the site defines it as Y` | Change `type` to the site's value |
-| `... lacks QRMI_..._IAM_APIKEY for <res>` | Check `name` and the key names, which depend on the type (`QRMI_IBM_QS_...` for `ibm-quantum-system`, `QRMI_IBM_QCS_...` for `ibm-quantum-compute-service`, `QRMI_IBM_QRS_...` for `qiskit-runtime-service`) |
+| `... lacks QRMI_..._IAM_APIKEY for <res>` | Check `name` and the key names, which depend on the type (`QRMI_IBM_QS_...` for `ibm-quantum-system`, `QRMI_IBM_QCS_...` for `ibm-quantum-compute-service`) |
 | Authentication error at acquire (401, 403, ...) | Wrong API key or CRN |
 | `rejected by the backend: ...` | The backend refused the job's user without a user key (401 or 403), e.g. Warden (Pasqal Local): the user is not in `api.authorized_users`, or SlurmUser is not in `api.admin_users`. The admin fixes the cause. The reason shows the first 200 characters of the answer; slurmctld.log has all of it. A MUNGE error (e.g. Warden has another MUNGE key) is not held: the user's jobs stay pending (`Resources`) for `cred_retry` seconds, then try again |
 
