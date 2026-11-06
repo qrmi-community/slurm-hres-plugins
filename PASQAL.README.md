@@ -68,5 +68,5 @@ Disable Warden:
 
 ```bash
 # As root user
- curl -X POST warden:4207/accessible -H "X-Munge-Cred: $(munge -n)" -H "Content-Type: application/json" -d '{"is_accessible": false, "message": "yolo"}'
+ curl -X POST warden:4207/accessible -H "X-Munge-Cred: $(munge -n)" -H "Content-Type: application/json" -d '{"is_accessible": false, "message": "Disabling Warden"}'
 ```
