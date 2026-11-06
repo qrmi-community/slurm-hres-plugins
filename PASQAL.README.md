@@ -60,6 +60,8 @@ curl warden:4207
 
 ## Run example
 
+From the cluster:
+
 ### Install venv
 
 ```bash
@@ -76,16 +78,28 @@ sbatch --resources=PASQAL-LOCAL:1 /shared/pulser_qrmi.sh
 
 ## Administrate Warden
 
-Disable Warden: 
+From the cluster:
+
+### Disable Warden: 
 
 ```bash
 # As root user
  curl -X POST warden:4207/accessible -H "X-Munge-Cred: $(munge -n)" -H "Content-Type: application/json" -d '{"is_accessible": false, "message": "Disabling Warden"}'
 ```
 
-Re-enable Warden:
+### Re-enable Warden:
 
 ```bash
 # As root user
  curl -X POST warden:4207/accessible -H "X-Munge-Cred: $(munge -n)" -H "Content-Type: application/json" -d '{"is_accessible": true, "message": "Enabling Warden"}'
+```
+
+## Reconfigure Warden and restart
+
+You can modify the `compose.pasqal.yml` file to change the `WARDEN_*` env variables and restart the container.
+
+To restart just the warden service:
+
+```bash
+docker compose -f compose.yml -f compose.pasqal.yml up -d --no-deps warden
 ```

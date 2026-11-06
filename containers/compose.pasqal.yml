@@ -18,25 +18,33 @@ x-ping: &ping
 services:
   warden:
     <<: *ping
-    image: localhost/warden:${WARDEN_VERSION:-0.3.2}
+    # Installed with Warden's install.sh, which checks out its latest release by default;
+    # pin one with e.g. WARDEN_VERSION=v0.3.2.
+    image: localhost/warden:${WARDEN_VERSION:-latest}
     build:
       args:
-        WARDEN_VERSION: ${WARDEN_VERSION:-0.3.2}
+        WARDEN_VERSION: ${WARDEN_VERSION:-}
       dockerfile_inline: |
         FROM python:3.12-slim
-        ARG WARDEN_VERSION
         RUN groupadd -r -g 998 munge && useradd -r -u 998 -g munge -d /var/lib/munge munge \
             && apt-get update \
-            && apt-get install -y --no-install-recommends munge make \
+            && apt-get install -y --no-install-recommends munge make git ca-certificates \
             && rm -rf /var/lib/apt/lists/* \
             && install -d -o munge -g munge -m 0755 /run/munge
-        ADD https://github.com/pasqal-io/warden.git#v$${WARDEN_VERSION} /opt/warden
-        RUN make -C /opt/warden install PYTHON=python3
+        # Re-checked on every build: a new release (new install.sh) invalidates the cache below.
+        ADD https://raw.githubusercontent.com/pasqal-io/warden/main/install.sh /tmp/warden-install.sh
+        ARG WARDEN_VERSION
+        # No tty during the build: the prompts keep their defaults (/opt/warden, PYTHON=python3).
+        # install.sh exits 0 even if the install fails, hence the checks.
+        RUN bash /tmp/warden-install.sh \
+            && test -x /opt/warden/.venv/bin/python \
+            && test -f /opt/warden/config.yaml
         WORKDIR /opt/warden
-        # Mock QPU API on localhost:8000 (Warden's default qpu.uri), then API + scheduler.
+        # Mock QPU API with QuTiP-emulated results on localhost:8000 (Warden's default
+        # qpu.uri), then API + scheduler.
         ENTRYPOINT ["/bin/bash", "-c", "\
           runuser -u munge -- /usr/sbin/munged \
-          && { .venv/bin/python -m uvicorn mock_qpu_api.app:app --app-dir tests --port 8000 & } \
+          && { make start-qutip-qpu & } \
           && exec make run"]
     hostname: warden
     container_name: warden-hres
@@ -44,7 +52,7 @@ services:
       WARDEN_API_PORT: "4207"
       WARDEN_QPU_URI: http://localhost:8000
       WARDEN_DATABASE_NAME: /opt/warden/db/warden.db
-      # root and SlurmUser (slurm, uid 990), which runs qrmi_hres.lua in slurmctld
+      # Important: root and SlurmUser (slurm, uid 990), which runs qrmi_hres.lua in slurmctld
       WARDEN_API_ADMINUSERS: '["0", "990"]'
       MOCK_QPU_API_SHOT_DURATION_S: "0.01"
       PYTHONUNBUFFERED: "1"
