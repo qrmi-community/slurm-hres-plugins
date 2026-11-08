@@ -41,7 +41,7 @@ Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later (t
 The example is the container cluster (slurmctld, slurmdbd, c1, c2, login), run with Podman or Docker Compose; the commands below use podman, so use docker instead with Docker. The steps are grouped by who does them. For how to build and run this cluster for developing and testing the plugin, see [containers/docs/INSTALL.md](./containers/docs/INSTALL.md).
 
 > [!NOTE]
-> For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
+> The steps below use IBM Quantum as the example. For provider-specific information (for example, Pasqal), see the [provider documentation](./docs/providers/).
 
 | Step | Who | How often |
 |---|---|---|
