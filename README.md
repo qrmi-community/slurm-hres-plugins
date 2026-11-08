@@ -1,9 +1,9 @@
 # QRMI plugin for Slurm HRES
 
-Last updated: 2026-11-06
-Targets: slurm-26-11-0-0rc1 (26.11.0 planned), QRMI 0.26.6 or later (main)
+Last updated: 2026-11-08
+Targets: slurm-26-11-0-0rc1 (26.11.0 planned), QRMI 0.26.6 (main)
 
-[![License](https://img.shields.io/github/license/qiskit-community/qrmi.svg?)](https://opensource.org/licenses/Apache-2.0) <!--- long-description-skip-begin -->
+[![License](https://img.shields.io/github/license/qrmi-community/slurm-hres-plugins.svg?)](./LICENSE)
 [![Current Release](https://img.shields.io/github/release/qrmi-community/slurm-hres-plugins.svg?)](https://github.com/qrmi-community/slurm-hres-plugins/releases)
 ![Platform](https://img.shields.io/badge/%F0%9F%92%BB_Platform-Linux-blue)
 [![Lua 5.4+](https://img.shields.io/badge/lua-5.4%2B-blue.svg?logo=lua&logoColor=white)](https://www.lua.org/manual/5.4/)
@@ -13,15 +13,43 @@ QRMI plugin for Slurm HRES lets the Slurm workload manager schedule quantum proc
 
 Each QPU backend is configured as an HRES resource that jobs request with --resources (or --licenses). Slurm checks the backend's availability before it allocates nodes, so jobs wait in the queue instead of holding classical resources idle. The plugin acquires the QPU for the job, passes the session to the job through the same environment variables as the earlier SPANK-based plugin (spank_qrmi), and releases it after the job ends. Calls to the quantum service are kept out of the scheduler's critical path, and each user keeps their own API key in a file they manage.
 
-This release contains the hres/lua plugin (qrmi_hres.lua), a TaskProlog, an administration tool for per-user credential directories, an optional job_submit/lua check, a container-based Slurm cluster for testing, and design and verification notes. It is intended as a reference implementation for integrating quantum resources with Slurm through HRES.
+It is intended as a reference implementation for integrating quantum resources with Slurm through HRES. This release contains:
 
-Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later, Lua 5.4.
+- the hres/lua plugin (`qrmi_hres.lua`)
+- a TaskProlog that exports the QRMI settings to the job (`hres_qrmi_taskprolog.sh`)
+- an administration tool for per-user credential directories (`qrmi_user_dir.sh`)
+- an optional job_submit/lua check of the user's credential file (`job_submit_qrmi.lua`)
+- a container-based Slurm cluster for testing (`containers/`)
+- design and verification notes (this document)
+
+Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later (tested with 0.26.6), Lua 5.4.
+
+## Contents
+
+- [0. Setup](#0-setup)
+  - [0.1 Prepare the cluster (admin, once)](#01-prepare-the-cluster-admin-once)
+  - [0.2 Add a user (admin, once per user)](#02-add-a-user-admin-once-per-user)
+  - [0.3 Register your API key (the user)](#03-register-your-api-key-the-user)
+  - [0.4 Submit and check jobs (the user)](#04-submit-and-check-jobs-the-user)
+  - [0.5 Troubleshooting](#05-troubleshooting)
+- [1. Background](#1-background)
+- [2. Architecture](#2-architecture)
+- [3. Deliverables](#3-deliverables)
+- [4. resources.yaml](#4-resourcesyaml)
+- [5. qrmi_hres.lua in detail](#5-qrmi_hreslua-in-detail)
+- [6. Container environment (Dockerfile additions)](#6-container-environment-dockerfile-additions)
+- [7. Verification results](#7-verification-results)
+- [8. Open issues](#8-open-issues)
+- [9. References](#9-references)
 
 ---
 
 ## 0. Setup
 
-The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login). The steps are grouped by who does them.
+The example is the container cluster (slurmctld, slurmdbd, c1, c2, login), run with Podman or Docker Compose; the commands below use `podman`, so use `docker` instead with Docker. The steps are grouped by who does them. For how to build and run this cluster for developing and testing the plugin, see [containers/docs/INSTALL.md](./containers/docs/INSTALL.md).
+
+> [!NOTE]
+> The steps below use IBM Quantum as the example. For provider-specific information (for example, Pasqal), see the [provider documentation](./docs/providers/).
 
 | Step | Who | How often |
 |---|---|---|
@@ -29,20 +57,11 @@ The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login)
 | 0.2 Add a user | Admin | Once per user |
 | 0.3 Register your API key | The user | At first, and when replacing the key |
 | 0.4 Submit and check jobs | The user | Any time |
+| 0.5 Troubleshooting | The user, the admin | When a job does not start |
 
 ### 0.1 Prepare the cluster (admin, once)
 
-**1. Build the image.** The Dockerfile builds QRMI and installs these files (details in section 6).
-
-```bash
-cd containers
-
-# docker
-docker compose build --no-cache
-
-# podman
-podman compose build --no-cache
-```
+**1. Build the image.** The Dockerfile builds QRMI and installs these files (details in [section 6](#6-container-environment-dockerfile-additions)).
 
 | File | Location |
 |---|---|
@@ -65,9 +84,10 @@ volumes:
   qrmi_creds:
 ```
 
-> **Note:** a bind mount of a macOS host directory (such as `/shared`) does not work. chown has no effect there and every file looks owned by root, so the owner check fails. Use a named volume. On a real cluster, a shared file system such as Lustre, GPFS or NFS works, as long as POSIX owners and permissions are enforced.
+> [!NOTE]
+> A bind mount of a macOS host directory (such as `/shared`) does not work. chown has no effect there and every file looks owned by root, so the owner check fails. Use a named volume. On a real cluster, a shared file system such as Lustre, GPFS or NFS works, as long as POSIX owners and permissions are enforced.
 
-**3. Prepare `qrmi_config.json` (the site definitions).** Write `name`, `type`, the endpoints and so on for each backend. The site key in this file is used only for `status()` in maintenance and never reaches jobs or nodes.
+**3. Prepare `qrmi_config.json` (the site definitions).** Write `name`, `type`, the endpoints and the other settings of each backend. Every QRMI call starts from this file: status(), acquire() and release() on the controller, and the job's environment, which node_job_prolog writes on the nodes. With per-user credentials ([5.8](#58-per-user-credentials)), only the keys in `user_keys` (by default the API key and the service CRN) are replaced by the user's own values; the endpoints, S3 and everything else always come from this file. The site's API key is then used only for status() in maintenance and never reaches jobs or nodes. The file is needed on the controller and on every node, at the same path.
 
 ```bash
 cp /etc/slurm/qrmi_config.json.example /etc/slurm/qrmi_config.json
@@ -97,8 +117,11 @@ chmod 640 /etc/slurm/resources.yaml
 ```
 PrologFlags=Alloc
 TaskProlog=/etc/slurm/hres_qrmi_taskprolog.sh
-Epilog=/bin/true    # required: without an Epilog, slurmd skips node_job_epilog (8.1)
+Epilog=/bin/true    # required: without an Epilog, slurmd skips node_job_epilog (see 8.1)
 ```
+
+> [!IMPORTANT]
+> `Epilog` is required even if you have no epilog script. Without it, slurmd skips the plugin's node epilog, and the job's files are left in `/run/hres_qrmi/` on the nodes ([8.1](#81-node_job_epilog-is-skipped-without-an-epilog-script-resolved-with-a-workaround)).
 
 **6. Apply and check.** Restart compose (if slurm.conf changed) or run `scontrol reconfigure`. A line like this in slurmctld.log means the configuration was loaded:
 
@@ -107,7 +130,7 @@ hres_qrmi: ibm_kingston: QRMI resource ibm_kingston type=ibm-quantum-compute-ser
   user_credentials=required user_keys=QRMI_IBM_QCS_IAM_APIKEY,QRMI_IBM_QCS_SERVICE_CRN required=QRMI_IBM_QCS_IAM_APIKEY
 ```
 
-The `type=` and `user_keys=` values are what users need for step 0.3.
+The `type=` and `user_keys=` values are what users need for [step 0.3](#03-register-your-api-key-the-user).
 
 If the log shows `hres_qrmi: <res>: ..., disabling the resource` instead, the plugin could not read the resource's definition, and jobs on it wait with reason `HRESDisabled`. Check that `qrmi_config.json` is owned by `root:slurm` with mode 640 (SlurmUser must be able to read it) and that it defines the resource, then run `scontrol reconfigure`.
 
@@ -118,6 +141,7 @@ As root, create the user's directory:
 ```bash
 QRMI_USER_BASE=/qrmi-creds qrmi_user_dir.sh alice bob
 # created /qrmi-creds/alice (alice:slurm 2750)
+# created /qrmi-creds/bob (bob:slurm 2750)
 ```
 
 | Path | Owner | Mode | Meaning |
@@ -125,13 +149,15 @@ QRMI_USER_BASE=/qrmi-creds qrmi_user_dir.sh alice bob
 | `/qrmi-creds/<user>/` | `<user>:slurm` | 2750 | The user can create and edit files. SlurmUser reads through the group. Other users cannot enter. setgid gives new files the slurm group automatically |
 | `/qrmi-creds/<user>/config.json` | `<user>:slurm` | 640 | The user can write it. SlurmUser can read it |
 
-- Never add users to the slurm group: they could read everyone's keys. The script warns if the group has members.
-- `QRMI_USER_BASE` must match `user_config` in `resources.yaml`(4.1).
+> [!WARNING]
+> Never add users to the slurm group: they could read everyone's keys. The script warns if the group has members.
+
+- `QRMI_USER_BASE` must match `user_config` in `resources.yaml` ([4.1](#41-plugin-config-entries-qrmi_hreslua)).
 - Optional: to report a bad file at submit time, install `job_submit_qrmi.lua` as `/etc/slurm/job_submit.lua` and add `JobSubmitPlugins=lua` to `slurm.conf`. Set `QRMI_RESOURCES` and `USER_CONFIG` in it to match `resources.yaml`.
 
 ### 0.3 Register your API key (the user)
 
-Ask the admin for the **resource name** and **type** of the backend you use (the values in the log of step 0.1-6). Write only your own keys, in the same format as `qrmi_config.json`:
+Ask the admin for the **resource name** and **type** of the backend you use (the values in the log of [step 0.1-6](#01-prepare-the-cluster-admin-once)). Write only your own keys, in the same format as `qrmi_config.json`:
 
 ```bash
 umask 027
@@ -177,13 +203,21 @@ sbatch --resources=ibm_kingston:1 job.sh
 squeue --me
 ```
 
+If the job does not start, look up its reason in [0.5 Troubleshooting](#05-troubleshooting).
+
+### 0.5 Troubleshooting
+
+#### Job states in `squeue`
+
 | `squeue` reason | Meaning | What to do |
 |---|---|---|
 | `Resources` | The backend is busy, has no free slots, or the status is stale. With `cred_fail=pend`, also after a credential failure (`cred_retry` seconds) | Wait. For a credential failure, fix the file and wait |
 | `BeginTime` | The job was requeued after a failure at start (e.g. a credential failure); it is scheduled again after the requeue delay (by default about 2 minutes) | Wait. With `cred_fail=hold`, the cause then appears as the reason |
-| `hres_qrmi: <res> credentials: ...` | The job is held because of a credential failure (`cred_fail=hold`, the default). The message is the cause | Fix the file (see below), then `scancel` and resubmit. An admin can also `scontrol release` the job |
+| `hres_qrmi: <res> credentials: ...` | The job is held because of a credential failure (`cred_fail=hold`, the default). The message is the cause | Fix the file (see [Credential errors](#credential-errors)), then `scancel` and resubmit. An admin can also `scontrol release` the job |
 | `ReqNodeNotAvail, May be reserved for other job` | `count` is used up | Wait for other jobs to finish |
 | `HRESDisabled` | The backend is not online (e.g. calibration) or `status()` fails | Wait; tell the admin if it persists |
+
+#### Credential errors
 
 Credential problems appear as the job's reason in `squeue` (with `cred_fail=hold`) and in slurmctld.log after `user credentials:`, with the cause (never the key values).
 
@@ -197,6 +231,8 @@ Credential problems appear as the job's reason in `squeue` (with `cred_fail=hold
 | `... lacks QRMI_..._IAM_APIKEY for <res>` | Check `name` and the key names, which depend on the type (`QRMI_IBM_QS_...` for `ibm-quantum-system`, `QRMI_IBM_QCS_...` for `ibm-quantum-compute-service`) |
 | Authentication error at acquire (401, 403, ...) | Wrong API key or CRN |
 | `rejected by the backend: ...` | The backend refused the job's user without a user key (401 or 403), e.g. Warden (Pasqal Local): the user is not in `api.authorized_users`, or SlurmUser is not in `api.admin_users`. The admin fixes the cause. The reason shows the first 200 characters of the answer; slurmctld.log has all of it. A MUNGE error (e.g. Warden has another MUNGE key) is not held: the user's jobs stay pending (`Resources`) for `cred_retry` seconds, then try again |
+
+#### After fixing the cause
 
 After fixing the file, resubmit the held job. The hold is an admin hold, so only an admin can release it instead (`scontrol release <jobid>`). This is also the way after fixing the site's side (`resources.yaml` or `qrmi_config.json`): `scontrol reconfigure` loads the new settings but does not release held jobs. Once released, the job reads the user's file again at its next start; if the problem remains, it is held again with the new cause. With `cred_fail=pend`, the job is retried automatically once `cred_retry` (default 300 s) has passed; to retry at once, the admin runs `rm /var/spool/slurmctld/hres_qrmi/credfail/<res>.<uid>` on slurmctld.
 
@@ -236,19 +272,19 @@ Quantum Resource Management Interface. Written in Rust, with C, Python and Lua A
 - `qrmi.new_from_config(id, type, env_table)` → a resource handle
 - `resource:acquire()` → token, `resource:release([token])`, `resource:status()`
 - `resource:detach()` (QRMI 0.26.4 or later) → the cached token, without releasing it
-- `resource:free()` frees the handle. A handle releases the token it has cached when it is freed or garbage-collected; the plugin uses `detach()` to keep the token for the job (5.6).
+- `resource:free()` frees the handle. A handle releases the token it has cached when it is freed or garbage-collected; the plugin uses `detach()` to keep the token for the job ([5.6](#56-keeping-the-token-after-the-async-pre-run)).
 
 ### 1.3 spank_qrmi (the previous approach)
 
 [spank_qrmi](https://github.com/qiskit-community/spank-plugins/tree/main/plugins/spank_qrmi) is the Slurm SPANK plugin for QRMI in [qiskit-community/spank-plugins](https://github.com/qiskit-community/spank-plugins), described in the [IBM Quantum Slurm plugin guide](https://quantum.cloud.ibm.com/docs/guides/slurm-plugin). It acquires the QPU when the job starts running, after its nodes are allocated, and exports the QRMI settings and the acquisition token to the job as environment variables.
 
-This document refers to it as the baseline. `qrmi_hres.lua` exports the same environment variable names (5.7), so programs that read them keep working, but it checks QPU availability before nodes are allocated, and QPUs are requested with `--resources`.
+This document refers to it as the baseline. `qrmi_hres.lua` exports the same environment variable names ([5.7](#57-job-environment-same-names-as-spank_qrmi)), so programs that read them keep working, but it checks QPU availability before nodes are allocated, and QPUs are requested with `--resources`.
 
 ---
 
 ## 2. Architecture
 
-[Presentation slide](./slurm_hres_qrmi.pdf)
+[Presentation slide](./docs/slurm_hres_qrmi.pdf)
 
 
 **One HRES resource = one QRMI resource (backend).** Every backend is reachable from both c1 and c2, so a resource has a single layer covering `c[1-2]` rather than splitting nodes. Users pick a backend by resource name.
@@ -313,7 +349,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `auto_disable` | `yes` | Toggle `disable_layer` from status (overrides a manual DisableLayer) |
 | `admission` | `yes` | Run the admission check in the pre-run |
 | `status_max_age` | `60` | Max age of the status cache in seconds; keep above `maintenance_cycle` |
-| `user_credentials` | `required` | `required`: per-user credentials (8.2) for types with user keys (`user_keys`, or the type's default); `pasqal-local` and `pasqal-cloud` have none (Pasqal Local: Warden identifies the job's user by MUNGE; Pasqal Cloud: the job reads the user's Pasqal config file, see 8.3), so they need no user file. `off`: the site key for every job (as spank_qrmi) |
+| `user_credentials` | `required` | `required`: per-user credentials ([5.8](#58-per-user-credentials)) for types with user keys (`user_keys`, or the type's default); `pasqal-local` and `pasqal-cloud` have none (Pasqal Local: Warden identifies the job's user by MUNGE; Pasqal Cloud: the job reads the user's Pasqal config file, see [8.3](#83-other)), so they need no user file. `off`: the site key for every job (as spank_qrmi) |
 | `user_config` | `/shared/qrmi/%u/config.json` | Path of the user's file. `%u` = user name, `%U` = uid |
 | `user_keys` | Per-type default | Keys taken from the user's file (comma-separated). By default the API key and the service CRN |
 | `user_required` | The `user_keys` ending in `APIKEY` or `AUTH_TOKEN` | Keys that must be in the user's file |
@@ -331,7 +367,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 |---|---|
 | `create_context` | Create `state_dir` and check that the resource is defined in `qrmi_config.json`. If not, return `ESLURM_HRES_MAINTENANCE_DISABLE` (all layers disabled, slurmctld keeps running) |
 | `maintenance` | ① Process the release queue (failures are retried next cycle) ② Delete revoke markers older than a day ③ Cache the result of `status()` ④ Enable or disable the layers |
-| `prerun` | If a credential failure marker (`credfail/`) is newer than `cred_retry`, hold the job with the cause as its reason (`cred_fail=hold`: a Lua error whose message Slurm stores as the reason) or return `REMOTE_FAIL` (`cred_fail=pend`). Then the admission check against the status cache (5.2). If it fails, return `REMOTE_FAIL` (job stays pending) |
+| `prerun` | If a credential failure marker (`credfail/`) is newer than `cred_retry`, hold the job with the cause as its reason (`cred_fail=hold`: a Lua error whose message Slurm stores as the reason) or return `REMOTE_FAIL` (`cred_fail=pend`). Then the admission check against the status cache ([5.2](#52-admission-check-may-the-job-run)). If it fails, return `REMOTE_FAIL` (job stays pending) |
 | `async_prerun` | Check the revoke marker → read the user's credential file → `acquire()` → save the token and the keys to files → check the revoke marker again (if the run was revoked or ended meanwhile, release the token) → return the token as the payload. A bad file or an authentication error is recorded in `credfail/` and returns `ERROR` (requeue); other failures return `REMOTE_FAIL` |
 | `revoke` | Create a revoke marker and queue the token for release, if there is one (`tokens/` → `release/`) |
 | `controller_epilog` | Same as `revoke`. Slurm also calls it when a job ends while the async pre-run is still acquiring (e.g. `scancel` while CONFIGURING); the marker makes the pre-run release the token it gets |
@@ -390,8 +426,10 @@ A run is identified by the `job_id` and `sluid` pair. A requeue changes the slui
 
 - **Normal state:** with no job running and nothing waiting for release, only `status/` has files (and `revoked/` markers younger than a day). Anything left in `tokens/`, `creds/` or `release/` belongs to a running job or a release that keeps failing; the log says why (`release ... failed`).
 - **Safe to delete:** `credfail/<res>.<uid>`, to let a user's jobs try again at once. `tmp/` holds copies of user files only for a moment; such a file left there after a crash can be deleted, but not a `*.releasing` file (a token).
-- **Do not delete:** `tokens/`, `creds/` and `release/`. Without them the plugin cannot release the token, and it stays acquired on the backend. A release that keeps failing is dropped after `release_give_up` (default one day) and logged.
 - **Secrets:** `creds/<key>` holds the user's API key in clear text from acquire until the release succeeds, and `tmp/` holds it for a moment while it is parsed. The directory is owned by SlurmUser, mode 0700, and the files 0600. Anyone who can read state_dir as root or SlurmUser, and any backup or copy of it (on the container cluster, the `var_spool_slurmctld` volume), can read those keys. So users manage their keys themselves, but the site also holds each key for the length of a job.
+
+> [!CAUTION]
+> Do not delete `tokens/`, `creds/` and `release/`. Without them the plugin cannot release the token, and it stays acquired on the backend. A release that keeps failing is dropped after `release_give_up` (default one day) and logged.
 
 ### 5.5 How often acquire is called
 
@@ -420,13 +458,23 @@ QRMI_JOB_ID, QRMI_JOB_UID
 
 `<qpu>_QRMI_JOB_QPU_SLOTS` is the count the job requested for that resource (`--resources=ibm_kingston:2` → `ibm_kingston_QRMI_JOB_QPU_SLOTS=2`; 1 when no count is given), so each QRMI resource can read its own. QRMI cannot read Slurm's own `SLURM_JOB_LICENSES`, as it does not depend on a resource manager. spank_qrmi does not set it yet.
 
-slurm.conf needs:
+The TaskProlog that exports these variables is set in slurm.conf ([0.1, step 5](#01-prepare-the-cluster-admin-once)).
 
-```
-PrologFlags=Alloc
-TaskProlog=/etc/slurm/hres_qrmi_taskprolog.sh
-Epilog=/bin/true    # required: without an Epilog, slurmd skips node_job_epilog (8.1)
-```
+### 5.8 Per-user credentials
+
+Implemented and verified on the cluster on 2026-10-24 (steps in [0.2](#02-add-a-user-admin-once-per-user) and [0.3](#03-register-your-api-key-the-user)). Before this, the site's API key was written into every job's `.env`, as with spank_qrmi. The other options considered were the site key on the controller with the user's key only in the job, a root-owned key store filled by a registration command, and acquiring on the node; per-user files were chosen because users manage their keys themselves and the controller can still acquire and release with them.
+
+- Each user keeps their API key in a file in the same format as `qrmi_config.json` (`user_config`, default `/shared/qrmi/<user>/config.json`; `/qrmi-creds/<user>/config.json` on the container cluster), and edits or replaces it themselves.
+- The admin creates the directory once with `qrmi_user_dir.sh <user>` (`<user>:slurm 2750`). Only the user, SlurmUser (and root) can read the file.
+- Only the keys in an allowlist (`user_keys`, by default `*_IAM_APIKEY` and `*_SERVICE_CRN`) are taken from the user's file; endpoints and everything else always come from the site. The site key is used only for status() and never reaches jobs or nodes.
+- For `ibm-quantum-system`, `IAM_APIKEY` and `SERVICE_CRN` are required when a handle is created, so the site still needs its own key in `qrmi_config.json` for status().
+- The `type` in the user's file must match the site definition. QRMI drops keys that do not belong to the type, so a mismatch is reported as such.
+- The file is read in async_prerun (outside the job lock), through an open file descriptor that is checked: symlinks, the wrong owner and group/other-writable files are refused. Its content is never logged.
+- The keys used for acquire are kept in `state_dir/creds/<key>` until the release; if the release fails with them (e.g. after a revoke), it is retried with the user's current file.
+- On a bad file, async_prerun fails (Slurm requeues the job). When the job is scheduled again, prerun holds it with the cause as its reason, which `squeue` shows (`cred_fail=hold`, the default), or keeps that user's jobs pending for `cred_retry` seconds (`cred_fail=pend`). The optional `job_submit_qrmi.lua` gives a clear error at submit time.
+- TaskProlog (as the user) reads the same file and exports `<resource>_<KEY>`, the names spank_qrmi used.
+- `user_credentials=off` restores the old behaviour (the site key for every job).
+- S3 keys remain site-wide and still reach the job ([8.2](#82-s3-keys-are-still-visible-to-jobs)).
 
 ---
 
@@ -442,12 +490,12 @@ The base is the spank-plugins demo Dockerfile (Rocky Linux 9, Slurm built from s
 3. Copy `resources.yaml.example`, `hres_trace.lua`, `qrmi_hres.lua` and `hres_qrmi_taskprolog.sh` into `/etc/slurm`, owned by root.
 4. Copy `qrmi_user_dir.sh` to `/usr/local/sbin/` and `job_submit_qrmi.lua` to `/etc/slurm/job_submit_qrmi.lua.example`.
 
-The named volume for the credentials (`qrmi_creds:/qrmi-creds`) is added in compose.yml (0.1).
+The named volume for the credentials (`qrmi_creds:/qrmi-creds`) is added in compose.yml ([0.1](#01-prepare-the-cluster-admin-once)).
 
 Notes:
 
 - `/etc/slurm` is a named volume (`etc_slurm`), so the volume must be recreated after the image changes.
-- Enabling HRES itself requires no slurm.conf change; this plugin still needs the TaskProlog and Epilog lines (0.1, step 5). slurmctld reads `resources.yaml` automatically if it sits next to slurm.conf (a syntax error is fatal).
+- Enabling HRES itself requires no slurm.conf change; this plugin still needs the TaskProlog and Epilog lines ([0.1, step 5](#01-prepare-the-cluster-admin-once)). slurmctld reads `resources.yaml` automatically if it sits next to slurm.conf (a syntax error is fatal).
 - `DebugFlags=License` helps with the initial checks.
 
 ---
@@ -455,6 +503,9 @@ Notes:
 ## 7. Verification results
 
 ### 7.1 Callback trace with hres_trace.lua (2026-10-22)
+
+<details>
+<summary>Results (9 items, all passed)</summary>
 
 | Item | Result |
 |---|---|
@@ -466,9 +517,14 @@ Notes:
 | node_job_prolog, task prolog, user task prolog, task epilog | ✅ |
 | user task prolog writing to stderr | ✅ |
 | controller_epilog | ✅ |
-| node_job_epilog | ✅ Only with an `Epilog` configured; skipped otherwise (8.1) |
+| node_job_epilog | ✅ Only with an `Epilog` configured; skipped otherwise ([8.1](#81-node_job_epilog-is-skipped-without-an-epilog-script-resolved-with-a-workaround)) |
+
+</details>
 
 ### 7.2 qrmi_hres.lua against the real backend (2026-10-24)
+
+<details>
+<summary>Results (8 items)</summary>
 
 | Item | Result |
 |---|---|
@@ -480,6 +536,8 @@ Notes:
 | `<qpu>_QRMI_JOB_TIMEOUT_SECONDS` | ✅ (2026-10-26) `--time=30:00` → 1800, `--time=01:00:00` → 3600, no `--time` → the partition's limit (432000 = 5 days) |
 | `type` mismatch (user file `ibm-quantum-system`, site `ibm-quantum-compute-service`) | ✅ Pending (the log said the key was missing). Now reported as a type mismatch (checked with mocks) |
 | File on a bind mount (macOS host) | ❌ chown has no effect, so the owner check fails → moved to a named volume |
+
+</details>
 
 ---
 
@@ -505,23 +563,17 @@ slurmd.log then shows `completed epilog for JobId=...`, and `/run/hres_qrmi/` is
 
 **Proper fix (to report to SchedMD):** also skip the shortcut when the job has HRES node callbacks, e.g. when the credential carries a `job_hres_list`.
 
-### 8.2 Credentials
+### 8.2 S3 keys are still visible to jobs
 
-**Current problem:** the node prolog writes **all** of `environments` into the user's `.env`, so the credentials in `qrmi_config.json` (API key, S3 keys) are visible to the job. This is the same as spank_qrmi.
-
-**Requirements**
-
-- S3 (`QRMI_IBM_QS_AWS_*` for ibm-quantum-system) is site-wide, but ideally should not be shown to users.
-- Quantum API keys (`QRMI_IBM_QS_IAM_APIKEY` / `SERVICE_CRN`) belong to individuals and are **managed by the users themselves** (e.g., kept in their home directory).
+**Problem:** with per-user credentials ([5.8](#58-per-user-credentials)), the site's API key no longer reaches jobs. The node prolog still writes the rest of the site's `environments` into the job's `.env`, so site-wide S3 keys (`QRMI_IBM_QS_AWS_*` for ibm-quantum-system) are visible to the job. This is the same as spank_qrmi.
 
 **Constraints found in the QRMI source**
 
-- For `ibm-quantum-system`, `IAM_APIKEY` and `SERVICE_CRN` are required when the handle is created, so even status needs a key.
 - The S3 settings are optional, but required by `task_*` (the job side).
-- No support for S3 temporary credentials (session token). `QRMI_WARDEN_URL` is only for Pasqal local.
+- No support for S3 temporary credentials (session token).
 - **Credentials used by the job process (running as the user) cannot be hidden from that user.**
 
-**Options for the S3 keys**
+**Options**
 
 | Option | Description | Assessment |
 |---|---|---|
@@ -531,45 +583,23 @@ slurmd.log then shows `completed epilog for JobId=...`, and `/run/hres_qrmi/` is
 
 Plan: option 1 for now, option 2 longer term (to be proposed to QRMI). **Which S3 service is in use (IBM COS / MinIO / AWS) is not yet confirmed.**
 
-**Options for the API keys (user-managed)**
-
-| Option | Controller side (status, acquire, release) | Job side (task) | Notes |
-|---|---|---|---|
-| 1 | Site key | TaskProlog (as the user) reads `~/.qrmi/` | Simplest. **Need to verify that a task can be submitted with the user's key into a session acquired with the site key** |
-| 2 | User key registered with `sudo qrmi-register` into a store (root:slurm 0640) | Same key | Users can update it themselves. Needs a registration script |
-| 3 | Node prolog (root) reads the user's home and acquires | Same key | Token sharing across nodes, drain/requeue risks; not recommended |
-
-All options **require the user home directories to be shared across containers** (the current compose.yml gives each container its own). `qrmi_config.json` should also be hidden from the login container (e.g., passed as a podman secret).
-
-**Next step:** verify on the real system whether option 1 works.
-
-#### Decision (2026-10-24): per-user credential files
-Implemented and verified on the cluster (steps in 0.2 and 0.3).
-
-- Each user keeps their API key in a file in the same format as `qrmi_config.json` (`user_config`, default `/shared/qrmi/<user>/config.json`; `/qrmi-creds/<user>/config.json` on the container cluster), and edits or replaces it themselves.
-- The admin creates the directory once with `qrmi_user_dir.sh <user>` (`<user>:slurm 2750`). Only the user, SlurmUser (and root) can read the file.
-- Only the keys in an allowlist (`user_keys`, by default `*_IAM_APIKEY` and `*_SERVICE_CRN`) are taken from the user's file; endpoints and everything else always come from the site. The site key is used only for status() and never reaches jobs or nodes.
-- The `type` in the user's file must match the site definition. QRMI drops keys that do not belong to the type, so a mismatch is reported as such.
-- The file is read in async_prerun (outside the job lock), through an open file descriptor that is checked: symlinks, the wrong owner and group/other-writable files are refused. Its content is never logged.
-- The keys used for acquire are kept in `state_dir/creds/<key>` until the release; if the release fails with them (e.g. after a revoke), it is retried with the user's current file.
-- On a bad file, async_prerun fails (Slurm requeues the job). When the job is scheduled again, prerun holds it with the cause as its reason, which `squeue` shows (`cred_fail=hold`, the default), or keeps that user's jobs pending for `cred_retry` seconds (`cred_fail=pend`). The optional `job_submit_qrmi.lua` gives a clear error at submit time.
-- TaskProlog (as the user) reads the same file and exports `<resource>_<KEY>`, the names spank_qrmi used.
-- `user_credentials=off` restores the old behaviour (the site key for every job).
-- S3 keys remain site-wide (open).
+`qrmi_config.json` should also be hidden from the login container (e.g., passed as a Podman or Docker secret).
 
 ### 8.3 Other
 
+> [!WARNING]
+> Do not enable spank_qrmi at the same time; it would acquire the QPU twice.
+
 - Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file.
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
-- Do not enable spank_qrmi at the same time; it would acquire twice.
-- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401, 403 or MUNGE), the job is held with Warden's answer as its reason, as for a credential failure; a MUNGE error keeps the user's jobs pending for `cred_retry` seconds instead.
 - Pasqal Cloud: the controller needs no credentials (`status()` uses a public endpoint; `acquire()` and `release()` do nothing for this type). The job's QRMI authenticates with the user's Pasqal config file (`username`/`password`, `client_id`/`client_secret` or `token`, and `project_id`), the first one found of:
   1. `$PASQAL_CONFIG_ROOT/.pasqal/config`, set by the user in the job's environment
   2. `$<qpu>_PASQAL_CONFIG_ROOT/.pasqal/config`: a site sets it with `PASQAL_CONFIG_ROOT` in the resource's `environment` in `qrmi_config.json`, which the TaskProlog exports with the resource prefix. `~` and `$VAR` are expanded in the job; use `$HOME/...` rather than `$USER`, which is not always set (e.g. jobs submitted from `podman exec`)
   3. `$HOME/.pasqal/config`, the default
 
-  A root without a config file falls back to the next one without a warning, so check the path with `RUST_LOG=debug` (`Reading Pasqal config file: ...`). `$HOME` must be readable on the compute nodes. A missing or wrong config file shows as an authentication error in the job's output, not as a held job. To use per-user credential files (8.2) for Pasqal Cloud instead, set `user_keys` (e.g. `QRMI_PASQAL_CLOUD_AUTH_TOKEN,QRMI_PASQAL_CLOUD_PROJECT_ID`) in the resource's plugin config.
+  A root without a config file falls back to the next one without a warning, so check the path with `RUST_LOG=debug` (`Reading Pasqal config file: ...`). `$HOME` must be readable on the compute nodes. A missing or wrong config file shows as an authentication error in the job's output, not as a held job. To use per-user credential files ([5.8](#58-per-user-credentials)) for Pasqal Cloud instead, set `user_keys` (e.g. `QRMI_PASQAL_CLOUD_AUTH_TOKEN,QRMI_PASQAL_CLOUD_PROJECT_ID`) in the resource's plugin config.
 - Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401 or 403), the job is held with Warden's answer as its reason, as for a credential failure; a MUNGE error keeps the user's jobs pending for `cred_retry` seconds instead.
+- For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
 - HRES as a whole is still beta, so the configuration format may change.
 - Jobs submitted with `podman exec login` run as root (uid=0). Use `-u user` to submit as a regular user when checking permissions.
 

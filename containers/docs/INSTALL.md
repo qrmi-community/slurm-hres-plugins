@@ -1,6 +1,6 @@
 # Installation of Slurm Cluster Containers
 
-This document describes how to set up a local, container-based Slurm development environment. The environment is intended for developing and testing QRMI and the SPANK plugin without access to a production HPC cluster.
+This document describes how to set up a local, container-based Slurm development environment. The environment is intended for developing and testing QRMI Plugin for Slurm HRES without access to a production HPC cluster.
 
 ## Jump To
 
