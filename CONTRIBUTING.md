@@ -32,6 +32,8 @@ cargo install stylua          # or: brew install stylua
 luarocks install luacheck     # or: brew install luacheck
 ```
 
+The same checks run on every push and pull request (`.github/workflows/lint.yml`).
+
 Before opening a pull request, run from the repository root:
 
 ```bash
@@ -41,6 +43,7 @@ shellcheck containers/*.sh
 ```
 
 `job_submit_qrmi.lua.example` is named explicitly because both tools only pick up `*.lua` files from a directory.
+
 
 ## Rules for the plugin
 

@@ -45,7 +45,8 @@ local function user_name(uid)
     return line and line:match("^([^:]+):") or nil
 end
 
--- "ibm_kingston:1[k=v],ibm_boston" -> { ibm_kingston, ibm_boston }
+-- job_desc.licenses holds --licenses and --resources (sbatch appends the
+-- latter to the former). "ibm_kingston:1[k=v],ibm_boston" -> { ibm_kingston, ibm_boston }
 local function requested(licenses)
     local out = {}
     local s = tostring(licenses or ""):gsub("%b[]", ""):gsub("%b()", "")

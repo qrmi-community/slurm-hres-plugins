@@ -3,7 +3,7 @@
 #SBATCH --job-name=hres-sampler
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --license=ibm_kingston:1
+#SBATCH --resources=ibm_kingston:1
 
 echo "Starting at `date`"
 echo "Running on hosts: $SLURM_NODELIST"

@@ -11,7 +11,7 @@
 # QPU backends: one resource per backend, one layer covering c[1-2]
 #   Every backend is reachable from both nodes, so the layer does not split
 #   nodes; the resource name selects the backend. Test:
-#   sbatch --license='ibm_kingston:1[foo=bar]' --wrap='hostname'
+#   sbatch --resources='ibm_kingston:1[foo=bar]' --wrap='hostname'
 #
 #   To add a backend, copy this entry and change "resource" and "backend".
 # ---------------------------------------------------------------------------
