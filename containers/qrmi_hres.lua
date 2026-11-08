@@ -150,11 +150,13 @@ local DEFAULTS = {
 }
 
 -- Keys a user may (and, for the secret ones, must) provide, by type.
+-- pasqal-cloud has none: the job's QRMI reads the user's own Pasqal config
+-- file (~/.pasqal/config by default), and the controller needs no key
+-- (status is public; acquire and release do nothing for this type).
 local USER_KEYS_BY_TYPE = {
     ["ibm-quantum-system"] = "QRMI_IBM_QS_IAM_APIKEY,QRMI_IBM_QS_SERVICE_CRN",
     ["ibm-quantum-compute-service"] = "QRMI_IBM_QCS_IAM_APIKEY,QRMI_IBM_QCS_SERVICE_CRN",
     ["qiskit-runtime-service"] = "QRMI_IBM_QRS_IAM_APIKEY,QRMI_IBM_QRS_SERVICE_CRN",
-    ["pasqal-cloud"] = "QRMI_PASQAL_CLOUD_AUTH_TOKEN,QRMI_PASQAL_CLOUD_PROJECT_ID",
 }
 
 ---------------------------------------------------------------------------
@@ -395,6 +397,10 @@ local function open_resource(config, hres_name, user_env, job)
     end
     env.QRMI_JOB_UID = tostring(job and job.user_id or 0)
     env.QRMI_JOB_ID = tostring(job and job.job_id or 0)
+    -- pasqal-cloud: where jobs find the user's Pasqal config file. The
+    -- controller reads no user file, and QRMI would warn on every status()
+    -- that it has none. Other types do not use it.
+    env.PASQAL_CONFIG_ROOT = nil
     local res, rerr = qrmi_mod.new_from_config(def.name, def.type, env)
     if not res then
         return nil, string.format("new_from_config(%s): %s", def.name, tostring(rerr))
