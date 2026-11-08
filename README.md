@@ -38,7 +38,7 @@ Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later (t
 
 ## 0. Setup
 
-The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login). The steps are grouped by who does them.
+The example is the container cluster (slurmctld, slurmdbd, c1, c2, login), run with Podman or Docker Compose; the commands below use podman, so use docker instead with Docker. The steps are grouped by who does them. For how to build and run this cluster for developing and testing the plugin, see [containers/docs/INSTALL.md](./containers/docs/INSTALL.md).
 
 > [!NOTE]
 > For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
@@ -53,16 +53,6 @@ The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login)
 ### 0.1 Prepare the cluster (admin, once)
 
 **1. Build the image.** The Dockerfile builds QRMI and installs these files (details in [section 6](#6-container-environment-dockerfile-additions)).
-
-```bash
-cd containers
-
-# docker
-docker compose build --no-cache
-
-# podman
-podman compose build --no-cache
-```
 
 | File | Location |
 |---|---|
@@ -142,6 +132,7 @@ As root, create the user's directory:
 ```bash
 QRMI_USER_BASE=/qrmi-creds qrmi_user_dir.sh alice bob
 # created /qrmi-creds/alice (alice:slurm 2750)
+# created /qrmi-creds/bob (alice:slurm 2750)
 ```
 
 | Path | Owner | Mode | Meaning |
