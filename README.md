@@ -42,7 +42,7 @@ Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later (t
 The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login). The steps are grouped by who does them.
 
 > [!NOTE]
-> For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
+> The steps below use IBM Quantum as the example. For provider-specific information (for example, Pasqal), see the [provider documentation](./docs/providers/).
 
 | Step | Who | How often |
 |---|---|---|
