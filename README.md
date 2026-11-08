@@ -23,7 +23,8 @@ Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later, L
 
 The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login). The steps are grouped by who does them.
 
-> **Note:** For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
+> [!NOTE]
+> For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
 
 | Step | Who | How often |
 |---|---|---|
@@ -67,7 +68,8 @@ volumes:
   qrmi_creds:
 ```
 
-> **Note:** a bind mount of a macOS host directory (such as `/shared`) does not work. chown has no effect there and every file looks owned by root, so the owner check fails. Use a named volume. On a real cluster, a shared file system such as Lustre, GPFS or NFS works, as long as POSIX owners and permissions are enforced.
+> [!NOTE]
+> A bind mount of a macOS host directory (such as `/shared`) does not work. chown has no effect there and every file looks owned by root, so the owner check fails. Use a named volume. On a real cluster, a shared file system such as Lustre, GPFS or NFS works, as long as POSIX owners and permissions are enforced.
 
 **3. Prepare `qrmi_config.json` (the site definitions).** Write `name`, `type`, the endpoints and so on for each backend. The site key in this file is used only for `status()` in maintenance and never reaches jobs or nodes.
 
