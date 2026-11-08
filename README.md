@@ -141,6 +141,7 @@ As root, create the user's directory:
 ```bash
 QRMI_USER_BASE=/qrmi-creds qrmi_user_dir.sh alice bob
 # created /qrmi-creds/alice (alice:slurm 2750)
+# created /qrmi-creds/bob (bob:slurm 2750)
 ```
 
 | Path | Owner | Mode | Meaning |
@@ -283,7 +284,7 @@ This document refers to it as the baseline. `qrmi_hres.lua` exports the same env
 
 ## 2. Architecture
 
-[Presentation slide](./slurm_hres_qrmi.pdf)
+[Presentation slide](./docs/slurm_hres_qrmi.pdf)
 
 
 **One HRES resource = one QRMI resource (backend).** Every backend is reachable from both c1 and c2, so a resource has a single layer covering `c[1-2]` rather than splitting nodes. Users pick a backend by resource name.
