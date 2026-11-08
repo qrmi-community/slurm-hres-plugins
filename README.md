@@ -1,6 +1,6 @@
 # QRMI plugin for Slurm HRES
 
-Last updated: 2026-11-06
+Last updated: 2026-11-08
 Targets: slurm-26-11-0-0rc1 (26.11.0 planned), QRMI 0.26.6 or later (main)
 
 [![License](https://img.shields.io/github/license/qiskit-community/qrmi.svg?)](https://opensource.org/licenses/Apache-2.0) <!--- long-description-skip-begin -->
@@ -22,6 +22,8 @@ Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later, L
 ## 0. Setup
 
 The example is the podman container cluster (slurmctld, slurmdbd, c1, c2, login). The steps are grouped by who does them.
+
+> **Note:** For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
 
 | Step | Who | How often |
 |---|---|---|
@@ -562,7 +564,6 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 - Differences from spank_qrmi: overriding credentials through the job environment (`ibm_kingston_QRMI_..._APIKEY=... sbatch`) is replaced by the per-user credential file.
 - slurmctld's `state_dir` (`/var/spool/slurmctld`) is lost when the container is recreated. Making it a named volume is recommended, so tokens waiting for release are not lost.
 - Do not enable spank_qrmi at the same time; it would acquire twice.
-- Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401, 403 or MUNGE), the job is held with Warden's answer as its reason, as for a credential failure; a MUNGE error keeps the user's jobs pending for `cred_retry` seconds instead.
 - Pasqal Cloud: the controller needs no credentials (`status()` uses a public endpoint; `acquire()` and `release()` do nothing for this type). The job's QRMI authenticates with the user's Pasqal config file (`username`/`password`, `client_id`/`client_secret` or `token`, and `project_id`), the first one found of:
   1. `$PASQAL_CONFIG_ROOT/.pasqal/config`, set by the user in the job's environment
   2. `$<qpu>_PASQAL_CONFIG_ROOT/.pasqal/config`: a site sets it with `PASQAL_CONFIG_ROOT` in the resource's `environment` in `qrmi_config.json`, which the TaskProlog exports with the resource prefix. `~` and `$VAR` are expanded in the job; use `$HOME/...` rather than `$USER`, which is not always set (e.g. jobs submitted from `podman exec`)
@@ -570,6 +571,7 @@ Implemented and verified on the cluster (steps in 0.2 and 0.3).
 
   A root without a config file falls back to the next one without a warning, so check the path with `RUST_LOG=debug` (`Reading Pasqal config file: ...`). `$HOME` must be readable on the compute nodes. A missing or wrong config file shows as an authentication error in the job's output, not as a held job. To use per-user credential files (8.2) for Pasqal Cloud instead, set `user_keys` (e.g. `QRMI_PASQAL_CLOUD_AUTH_TOKEN,QRMI_PASQAL_CLOUD_PROJECT_ID`) in the resource's plugin config.
 - Pasqal Local: `acquire()` and `release()` run on slurmctld as SlurmUser (UID 990 in the containers), and Warden lets only the users in its `api.admin_users` open and revoke sessions for other users. Add SlurmUser's UID there, e.g. `admin_users: ["0", "990"]`. If Warden refuses the session (401 or 403), the job is held with Warden's answer as its reason, as for a credential failure; a MUNGE error keeps the user's jobs pending for `cred_retry` seconds instead.
+- For more information about the Pasqal provider, please also refer to [this documentation](./docs/providers/pasqal/README.md).
 - HRES as a whole is still beta, so the configuration format may change.
 - Jobs submitted with `podman exec login` run as root (uid=0). Use `-u user` to submit as a regular user when checking permissions.
 
