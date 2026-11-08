@@ -63,16 +63,6 @@ The example is the container cluster (slurmctld, slurmdbd, c1, c2, login), run w
 
 **1. Build the image.** The Dockerfile builds QRMI and installs these files (details in [section 6](#6-container-environment-dockerfile-additions)).
 
-```bash
-cd containers
-
-# docker
-docker compose build --no-cache
-
-# podman
-podman compose build --no-cache
-```
-
 | File | Location |
 |---|---|
 | `qrmi_hres.lua`, `hres_trace.lua`, `resources.yaml.example` | `/etc/slurm/` |
