@@ -1,0 +1,70 @@
+# Local Pasqal QPU: Warden (pasqal-io/warden) in front of its mock QPU API, on the Slurm
+# cluster network. Not a real QPU.
+#   docker compose -f compose.yml -f compose.pasqal.yml up -d
+# Inside slurm-network, "warden" resolves via Compose's built-in DNS; QRMI reaches it at
+# http://warden:4207 (see qrmi_config.json.example, resource type pasqal-local).
+# Warden authenticates requests with MUNGE, so it shares the cluster's munge key (etc_munge).
+# munged requires the key to be owned by its user: the munge user is created with the uid
+# it has in the Slurm image (998), which owns the key.
+
+# Allow ping inside the containers. Podman drops NET_RAW by default and limits
+# ping_group_range to GID 0; this works the same on Docker/Rancher Desktop.
+x-ping: &ping
+  cap_add:
+    - NET_RAW
+  sysctls:
+    net.ipv4.ping_group_range: "0 2147483647"
+
+services:
+  warden:
+    <<: *ping
+    # Installed with Warden's install.sh, which checks out its latest release by default;
+    # pin one with e.g. WARDEN_VERSION=v0.3.2.
+    image: localhost/warden:${WARDEN_VERSION:-latest}
+    build:
+      args:
+        WARDEN_VERSION: ${WARDEN_VERSION:-}
+      dockerfile_inline: |
+        FROM python:3.12-slim
+        RUN groupadd -r -g 998 munge && useradd -r -u 998 -g munge -d /var/lib/munge munge \
+            && apt-get update \
+            && apt-get install -y --no-install-recommends munge make git ca-certificates \
+            && rm -rf /var/lib/apt/lists/* \
+            && install -d -o munge -g munge -m 0755 /run/munge
+        # Re-checked on every build: a new release (new install.sh) invalidates the cache below.
+        ADD https://raw.githubusercontent.com/pasqal-io/warden/main/install.sh /tmp/warden-install.sh
+        ARG WARDEN_VERSION
+        # No tty during the build: the prompts keep their defaults (/opt/warden, PYTHON=python3).
+        # install.sh exits 0 even if the install fails, hence the checks.
+        RUN bash /tmp/warden-install.sh \
+            && test -x /opt/warden/.venv/bin/python \
+            && test -f /opt/warden/config.yaml
+        WORKDIR /opt/warden
+        # Mock QPU API with QuTiP-emulated results on localhost:8000 (Warden's default
+        # qpu.uri), then API + scheduler.
+        ENTRYPOINT ["/bin/bash", "-c", "\
+          runuser -u munge -- /usr/sbin/munged \
+          && { make start-qutip-qpu & } \
+          && exec make run"]
+    hostname: warden
+    container_name: warden-hres
+    environment:
+      WARDEN_API_PORT: "4207"
+      WARDEN_QPU_URI: http://localhost:8000
+      WARDEN_DATABASE_NAME: /opt/warden/db/warden.db
+      # Important: root and SlurmUser (slurm, uid 990), which runs qrmi_hres.lua in slurmctld
+      WARDEN_API_ADMINUSERS: '["0", "990"]'
+      MOCK_QPU_API_SHOT_DURATION_S: "0.01"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - etc_munge:/etc/munge
+      - warden_db:/opt/warden/db
+    expose:
+      - "4207"
+    depends_on:
+      - "slurmctld"
+    networks:
+      - slurm-network
+
+volumes:
+  warden_db:
