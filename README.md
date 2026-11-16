@@ -1,6 +1,6 @@
 # QRMI plugin for Slurm HRES
 
-Last updated: 2026-11-08
+Last updated: 2026-11-16
 Targets: slurm-26-11-0-0rc1 (26.11.0 planned), QRMI 0.26.6 (main)
 
 [![License](https://img.shields.io/github/license/qrmi-community/slurm-hres-plugins.svg?)](./LICENSE)
