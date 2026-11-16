@@ -7,7 +7,7 @@ Targets: slurm-26-11-0-0rc1 (26.11.0 planned), QRMI 0.26.6 (main)
 [![Current Release](https://img.shields.io/github/release/qrmi-community/slurm-hres-plugins.svg?)](https://github.com/qrmi-community/slurm-hres-plugins/releases)
 ![Platform](https://img.shields.io/badge/%F0%9F%92%BB_Platform-Linux-blue)
 [![Lua 5.4+](https://img.shields.io/badge/lua-5.4%2B-blue.svg?logo=lua&logoColor=white)](https://www.lua.org/manual/5.4/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20650771.svg)](https://doi.org/10.5281/zenodo.20650771)
+[![DOI](https://zenodo.org/badge/1430845288.svg)](https://doi.org/10.5281/zenodo.24286253)
 
 QRMI plugin for Slurm HRES lets the Slurm workload manager schedule quantum processors (QPUs) alongside CPUs and GPUs. It is a plugin for the Hierarchical Resources (HRES) interface of Slurm (hres/lua, introduced in Slurm 26.11 and currently in RC1), built on QRMI, the Quantum Resource Management Interface.
 
