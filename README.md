@@ -1,7 +1,7 @@
 # QRMI plugin for Slurm HRES
 
-Last updated: 2026-11-17
-Targets: slurm-26-11-0-0rc2 (26.11.0 planned), QRMI 0.27.0 (main)
+Last updated: 2026-11-19
+Targets: slurm-26-11-0-0rc2 (26.11.0 planned), QRMI 0.27.1 (main)
 
 [![License](https://img.shields.io/github/license/qrmi-community/slurm-hres-plugins.svg?)](./LICENSE)
 [![Current Release](https://img.shields.io/github/release/qrmi-community/slurm-hres-plugins.svg?)](https://github.com/qrmi-community/slurm-hres-plugins/releases)
@@ -117,11 +117,7 @@ chmod 640 /etc/slurm/resources.yaml
 ```
 PrologFlags=Alloc
 TaskProlog=/etc/slurm/hres_qrmi_taskprolog.sh
-Epilog=/bin/true    # required: without an Epilog, slurmd skips node_job_epilog (see 8.1)
 ```
-
-> [!IMPORTANT]
-> `Epilog` is required even if you have no epilog script. Without it, slurmd skips the plugin's node epilog, and the job's files are left in `/run/hres_qrmi/` on the nodes ([8.1](#81-node_job_epilog-is-skipped-without-an-epilog-script-resolved-with-a-workaround)).
 
 **6. Apply and check.** Restart compose (if slurm.conf changed) or run `scontrol reconfigure`. A line like this in slurmctld.log means the configuration was loaded:
 
@@ -349,7 +345,7 @@ The Lua scripts must be at the same path on the controller and every node, **own
 | `auto_disable` | `yes` | Toggle `disable_layer` from status (overrides a manual DisableLayer) |
 | `admission` | `yes` | Run the admission check in the pre-run |
 | `status_max_age` | `60` | Max age of the status cache in seconds; keep above `maintenance_cycle` |
-| `user_credentials` | `required` | `required`: per-user credentials ([5.8](#58-per-user-credentials)) for types with user keys (`user_keys`, or the type's default); `pasqal-local` and `pasqal-cloud` have none (Pasqal Local: Warden identifies the job's user by MUNGE; Pasqal Cloud: the job reads the user's Pasqal config file, see [8.3](#83-other)), so they need no user file. `off`: the site key for every job (as spank_qrmi) |
+| `user_credentials` | `required` | `required`: per-user credentials ([5.8](#58-per-user-credentials)) for types with user keys (`user_keys`, or the type's default); `pasqal-local` and `pasqal-cloud` have none (Pasqal Local: Warden identifies the job's user by MUNGE; Pasqal Cloud: the job reads the user's Pasqal config file, see [8.2](#82-other)), so they need no user file. `off`: the site key for every job (as spank_qrmi) |
 | `user_config` | `/shared/qrmi/%u/config.json` | Path of the user's file. `%u` = user name, `%U` = uid |
 | `user_keys` | Per-type default | Keys taken from the user's file (comma-separated). By default the API key and the service CRN |
 | `user_required` | The `user_keys` ending in `APIKEY` or `AUTH_TOKEN` | Keys that must be in the user's file |
@@ -474,7 +470,7 @@ Implemented and verified on the cluster on 2026-10-24 (steps in [0.2](#02-add-a-
 - On a bad file, async_prerun fails (Slurm requeues the job). When the job is scheduled again, prerun holds it with the cause as its reason, which `squeue` shows (`cred_fail=hold`, the default), or keeps that user's jobs pending for `cred_retry` seconds (`cred_fail=pend`). The optional `job_submit_qrmi.lua` gives a clear error at submit time.
 - TaskProlog (as the user) reads the same file and exports `<resource>_<KEY>`, the names spank_qrmi used.
 - `user_credentials=off` restores the old behaviour (the site key for every job).
-- S3 keys remain site-wide and still reach the job ([8.2](#82-s3-keys-are-still-visible-to-jobs)).
+- S3 keys remain site-wide and still reach the job ([8.1](#81-s3-keys-are-still-visible-to-jobs)).
 
 ---
 
@@ -517,7 +513,7 @@ Notes:
 | node_job_prolog, task prolog, user task prolog, task epilog | ✅ |
 | user task prolog writing to stderr | ✅ |
 | controller_epilog | ✅ |
-| node_job_epilog | ✅ Only with an `Epilog` configured; skipped otherwise ([8.1](#81-node_job_epilog-is-skipped-without-an-epilog-script-resolved-with-a-workaround)) |
+| node_job_epilog | ✅ |
 
 </details>
 
@@ -543,27 +539,7 @@ Notes:
 
 ## 8. Open issues
 
-### 8.1 node_job_epilog is skipped without an Epilog script (resolved with a workaround)
-
-**Symptom:** node_job_epilog never ran, so `/run/hres_qrmi/job_<id>/` was left on the nodes after every job. hres_trace.lua showed the node prolog but not the node epilog.
-
-**Cause:** in `_rpc_terminate_job()` (`src/slurmd/slurmd/req.c`), slurmd takes a shortcut when no job step is still running, no `Epilog` is configured and no SPANK plugin has an epilog: it replies `ALREADY_COMPLETE` without calling `run_epilog()`. The condition does not look at HRES, so `hres_g_node_job_epilog()` is skipped as well. A batch job that ends normally takes this path. (`sent ALREADY_COMPLETE` is logged only at debug4.)
-
-```c
-if ((nsteps == 0) && !slurm_conf.epilog && !spank_has_epilog()) {
-```
-
-**Workaround (verified 2026-10-25):** configure any Epilog in slurm.conf, so the shortcut is not taken.
-
-```
-Epilog=/bin/true
-```
-
-slurmd.log then shows `completed epilog for JobId=...`, and `/run/hres_qrmi/` is empty after the job.
-
-**Proper fix (to report to SchedMD):** also skip the shortcut when the job has HRES node callbacks, e.g. when the credential carries a `job_hres_list`.
-
-### 8.2 S3 keys are still visible to jobs
+### 8.1 S3 keys are still visible to jobs
 
 **Problem:** with per-user credentials ([5.8](#58-per-user-credentials)), the site's API key no longer reaches jobs. The node prolog still writes the rest of the site's `environments` into the job's `.env`, so site-wide S3 keys (`QRMI_IBM_QS_AWS_*` for ibm-quantum-system) are visible to the job. This is the same as spank_qrmi.
 
@@ -585,7 +561,7 @@ Plan: option 1 for now, option 2 longer term (to be proposed to QRMI). **Which S
 
 `qrmi_config.json` should also be hidden from the login container (e.g., passed as a Podman or Docker secret).
 
-### 8.3 Other
+### 8.2 Other
 
 > [!WARNING]
 > Do not enable spank_qrmi at the same time; it would acquire the QPU twice.
