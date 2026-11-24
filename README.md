@@ -1,7 +1,7 @@
 # QRMI plugin for Slurm HRES
 
-Last updated: 2026-11-19
-Targets: slurm-26-11-0-0rc2 (26.11.0 planned), QRMI 0.27.1 (main)
+Last updated: 2026-11-25
+Targets: slurm-26-11-0-1, QRMI 0.28.0 (main)
 
 [![License](https://img.shields.io/github/license/qrmi-community/slurm-hres-plugins.svg?)](./LICENSE)
 [![Current Release](https://img.shields.io/github/release/qrmi-community/slurm-hres-plugins.svg?)](https://github.com/qrmi-community/slurm-hres-plugins/releases)
@@ -239,7 +239,7 @@ After fixing the file, resubmit the held job. The hold is an admin hold, so only
 
 ### 1.1 Slurm HRES plugins
 
-slurm-26-11-0-0rc1 gained a plugin interface for Hierarchical Resources (HRES, beta since 25.05). A plugin is enabled per resource and lets an external service take part in the lifecycle of the jobs that use that resource. The only implementation today is `hres/lua` (a Lua script).
+slurm-26-11-0-1 gained a plugin interface for Hierarchical Resources (HRES, beta since 25.05). A plugin is enabled per resource and lets an external service take part in the lifecycle of the jobs that use that resource. The only implementation today is `hres/lua` (a Lua script).
 
 | Callback | Runs on | Typical use |
 |---|---|---|
