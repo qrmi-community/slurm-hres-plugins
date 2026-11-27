@@ -13,6 +13,10 @@ QRMI plugin for Slurm HRES lets the Slurm workload manager schedule quantum proc
 
 Each QPU backend is configured as an HRES resource that jobs request with --resources (or --licenses). Slurm checks the backend's availability before it allocates nodes, so jobs wait in the queue instead of holding classical resources idle. The plugin acquires the QPU for the job, passes the session to the job through the same environment variables as the earlier SPANK-based plugin (spank_qrmi), and releases it after the job ends. Calls to the quantum service are kept out of the scheduler's critical path, and each user keeps their own API key in a file they manage.
 
+<p align="center">
+  <img src="docs/qrmi_plugin_for_slurm_hres.png" width="1440" alt="QRMI Plugin for Slurm HRES Overview">
+</p>
+
 It is intended as a reference implementation for integrating quantum resources with Slurm through HRES. This release contains:
 
 - the hres/lua plugin (`qrmi_hres.lua`)
@@ -22,11 +26,8 @@ It is intended as a reference implementation for integrating quantum resources w
 - a container-based Slurm cluster for testing (`containers/`)
 - design and verification notes (this document)
 
-Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later (tested with 0.26.6), Lua 5.4.
+Requirements: Slurm 26-11-0-1 or later (HRES with hres/lua), QRMI 0.26.4 or later, Lua 5.4.
 
-<p align="center">
-  <img src="docs/qrmi_plugin_for_slurm_hres.png" width="1440" alt="QRMI Plugin for Slurm HRES Overview">
-</p>
 
 ## Contents
 
