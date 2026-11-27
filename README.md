@@ -25,7 +25,7 @@ It is intended as a reference implementation for integrating quantum resources w
 Requirements: Slurm 26.11 or later (HRES with hres/lua), QRMI 0.26.4 or later (tested with 0.26.6), Lua 5.4.
 
 <p align="center">
-  <img src="docs/images/qrmi_plugin_for_slurm_hres.png" width="1440" alt="QRMI Plugin for Slurm HRES Overview">
+  <img src="docs/qrmi_plugin_for_slurm_hres.png" width="1440" alt="QRMI Plugin for Slurm HRES Overview">
 </p>
 
 ## Contents
